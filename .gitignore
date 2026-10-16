@@ -1,0 +1,34 @@
+# ==========================================
+# Caches Globais e Locais do Terragrunt
+# ==========================================
+.terragrunt-cache/
+.tg-plans/
+
+# ==========================================
+# Arquivos Temporários e Plugins do Terraform
+# ==========================================
+.terraform/
+.terraform.lock.hcl
+
+# Arquivos de log e relatórios de erro
+crash.log
+crash.*.log
+
+# ==========================================
+# Arquivos de Estado Local e Modificações
+# ==========================================
+*.tfstate
+*.tfstate.*
+
+# Arquivos de substituição locais (Overrides)
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ==========================================
+# Variáveis e Arquivos de Segredo
+# ==========================================
+*.tfvars
+# Permite subir apenas os arquivos de exemplo estruturados
+!*.tfvars.example
