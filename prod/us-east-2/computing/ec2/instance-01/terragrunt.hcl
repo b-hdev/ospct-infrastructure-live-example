@@ -16,25 +16,25 @@ inputs = {
   instance_type = "t3.micro"
   key_name      = "user1"
 
-  subnet_id              = dependency.vpc.outputs.private_subnets[0]
+  subnet_id  = dependency.vpc.outputs.private_subnets[0]
   create_eip = true
 
-  security_group_rules = {
-    ingress_ssh = {
+  create_security_group = true
+
+  security_group_ingress_rules = {
+    ssh = {
       description = "Permitir SSH"
-      cidr_blocks = ["0.0.0.0/0"]
+      cidr_ipv4   = "0.0.0.0/0"
       from_port   = 22
+      ip_protocol = "tcp"
       to_port     = 22
-      protocol    = "tcp"
-      type        = "ingress"
     }
-    egress_all = {
-      description = "Permitir todo o trafego de saida"
-      cidr_blocks = ["0.0.0.0/0"]
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      type        = "egress"
+  }
+
+  security_group_egress_rules = {
+    all = {
+      cidr_ipv4   = "0.0.0.0/0"
+      ip_protocol = "-1"
     }
   }
 
