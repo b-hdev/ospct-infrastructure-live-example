@@ -10,6 +10,10 @@ dependency "vpc" {
   config_path = "../../networking/vpc/vpc-ospct"
 }
 
+dependency "ec2" {
+  config_path = "../../computing/ec2/instance-01"
+}
+
 inputs = {
   identifier = "meu-rds-db"
 
@@ -30,7 +34,15 @@ inputs = {
 
   create_db_subnet_group = true
   subnet_ids             = dependency.vpc.outputs.private_subnets
+  
   vpc_security_group_ids = [dependency.vpc.outputs.default_security_group_id]
+
+  ingress_with_source_security_group_id = [
+    {
+      rule                     = "postgresql-tcp"
+      source_security_group_id = dependency.ec2.outputs.security_group_id
+    }
+  ]
 
   skip_final_snapshot  = true
   deletion_protection  = false
