@@ -14,6 +14,10 @@ dependency "ec2" {
   config_path = "../../computing/ec2/instance-01"
 }
 
+dependency "rds_sg" {
+  config_path = "../../networking/security-groups/rds-sg"
+}
+
 inputs = {
   identifier = "meu-rds-db"
 
@@ -34,20 +38,8 @@ inputs = {
   create_db_subnet_group = true
   subnet_ids             = dependency.vpc.outputs.private_subnets
 
-  # O módulo cria automaticamente o seu próprio Security Group e aplica a regra para a EC2
-  create_security_group = true
-  vpc_id                = dependency.vpc.outputs.vpc_id
-
-  security_group_rules = {
-    ingress_ec2 = {
-      description              = "Acesso PostgreSQL vindo da EC2"
-      type                     = "ingress"
-      from_port                = 5432
-      to_port                  = 5432
-      protocol                 = "tcp"
-      source_security_group_id = dependency.ec2.outputs.security_group_id
-    }
-  }
+  # Referencia o SG criado como componente separado
+  vpc_security_group_ids = [dependency.rds_sg.outputs.id]
 
   skip_final_snapshot = true
   deletion_protection = false
