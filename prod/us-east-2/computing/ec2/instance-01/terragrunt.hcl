@@ -16,7 +16,8 @@ inputs = {
   instance_type = "t3.micro"
   key_name      = "user1"
 
-  subnet_id  = dependency.vpc.outputs.private_subnets[0]
+  subnet_id = dependency.vpc.outputs.public_subnets[0]
+  
   create_eip = true
 
   create_security_group = true
@@ -24,7 +25,7 @@ inputs = {
   security_group_ingress_rules = {
     ssh = {
       description = "Permitir SSH"
-      cidr_ipv4   = "0.0.0.0/0"
+      cidr_ipv4   = "3.16.146.0/29"
       from_port   = 22
       ip_protocol = "tcp"
       to_port     = 22
