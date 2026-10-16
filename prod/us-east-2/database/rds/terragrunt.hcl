@@ -34,6 +34,7 @@ inputs = {
   create_db_subnet_group = true
   subnet_ids             = dependency.vpc.outputs.private_subnets
 
+  # O módulo cria automaticamente o seu próprio Security Group e aplica a regra para a EC2
   create_security_group = true
   vpc_id                = dependency.vpc.outputs.vpc_id
 
@@ -48,8 +49,8 @@ inputs = {
     }
   }
 
-  skip_final_snapshot  = true
-  deletion_protection  = false
+  skip_final_snapshot = true
+  deletion_protection = false
 
   tags = {
     Terraform   = "true"
