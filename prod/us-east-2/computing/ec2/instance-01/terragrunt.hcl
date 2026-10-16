@@ -16,8 +16,27 @@ inputs = {
   instance_type = "t3.micro"
   key_name      = "user1"
 
-  vpc_security_group_ids = [dependency.vpc.outputs.default_security_group_id]
   subnet_id              = dependency.vpc.outputs.private_subnets[0]
+  create_eip = true
+
+  security_group_rules = {
+    ingress_ssh = {
+      description = "Permitir SSH"
+      cidr_blocks = ["0.0.0.0/0"]
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      type        = "ingress"
+    }
+    egress_all = {
+      description = "Permitir todo o trafego de saida"
+      cidr_blocks = ["0.0.0.0/0"]
+      from_port   = 0
+      to_port     = 0
+      protocol    = "-1"
+      type        = "egress"
+    }
+  }
 
   tags = {
     Terraform   = "true"
