@@ -26,22 +26,23 @@ inputs = {
 
   network_mode = "bridge"
 
+  create_security_group = false
+
   cpu = 512
   memory = 512
 
 container_definitions = {
     nginx = {
-      image = "public.ecr.aws/nginx/nginx:alpine"
-      # Mapeamento de portas: Porta 80 do container exposta na porta 80 da EC2 (host)
+      image = "nginxinc/nginx-unprivileged:1.31-alpine"
+      # Porta 8080 interna do container mapeada para a porta 8080 da EC2 (host)
       port_mappings = [
         {
           name          = "nginx"
-          containerPort = 80
-          hostPort      = 80
+          containerPort = 8080
+          hostPort      = 8080
           protocol      = "tcp"
         }
       ]
-      # Recursos mínimos reservados para esse container dentro da task
       memory_reservation = 256
       essential          = true
     }

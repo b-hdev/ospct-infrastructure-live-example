@@ -21,7 +21,7 @@ inputs = {
 
   key_name = "user1"
 
-  ami = "ami-0b44aeebc597022d4"
+  ami_ssm_parameter = "/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id"
 
   create_iam_instance_profile = true
   iam_role_name = "ecs-instance-role-ospct"
@@ -45,8 +45,8 @@ inputs = {
     http = {
       description = "HTTP Container"
       cidr_ipv4 = "0.0.0.0/0"
-      from_port = 80
-      to_port = 80
+      from_port = 8080
+      to_port = 8080
       ip_protocol = "tcp"
     }
   }
