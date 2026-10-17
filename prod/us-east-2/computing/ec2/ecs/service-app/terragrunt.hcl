@@ -32,8 +32,8 @@ inputs = {
 
   create_security_group = false
 
-  cpu = 512
-  memory = 512
+  cpu = 256
+  memory = 128
 
   container_definitions = {
     nginx = {
@@ -47,7 +47,7 @@ inputs = {
           protocol      = "tcp"
         }
       ]
-      memoryReservation      = 256
+      memoryReservation      = 128
       readonlyRootFilesystem = false
       essential              = true
     }

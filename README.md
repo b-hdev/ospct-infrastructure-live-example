@@ -170,5 +170,6 @@ nc -zv meu-rds-db.<id>.us-east-2.rds.amazonaws.com 5432
 - **Credenciais AWS**: renove a sessão antes de executar comandos (`aws login` ou `aws sso login`).
 - **AMI Dinâmica do ECS**: O nó do ECS utiliza `ami_ssm_parameter` para puxar sempre a versão oficial mais recente da Amazon Linux 2023 ECS-Optimized sem depender de AMI IDs estáticos.
 - **Portas e Non-Root**: O container utiliza `nginxinc/nginx-unprivileged:1.31-alpine` com `network_mode = bridge` na porta `8080:8080` para maior segurança.
+- **Dimensionamento de Recursos (ECS)**: O container Nginx está fixado em `256` CPU units e `128 MB` de memória (`memoryReservation = 128`). Como o consumo real do Nginx raramente passa de 30-50 MB, 128 MB garante estabilidade sob alta carga e viabiliza *Rolling Updates* seguros dentro de uma única instância `t3.micro` (~950 MB livres) sem esgotar a RAM da máquina.
 - **Custos**: O **NAT Gateway** é o recurso mais oneroso (~$32/mês). Lembre-se de destruí-lo com `tg destroy` na VPC quando o ambiente de estudos não estiver em uso.
 - **State remoto (S3)**: Mantido no bucket S3 configurado no [root.hcl](root.hcl). O `tg destroy` remove apenas os recursos provisionados, preservando o histórico de estado.
