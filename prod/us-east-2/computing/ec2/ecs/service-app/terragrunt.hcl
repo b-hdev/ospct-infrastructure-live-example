@@ -35,11 +35,11 @@ inputs = {
   cpu = 512
   memory = 512
 
-container_definitions = {
+  container_definitions = {
     nginx = {
       image = "nginxinc/nginx-unprivileged:1.31-alpine"
       # Porta 8080 interna do container mapeada para a porta 8080 da EC2 (host)
-      port_mappings = [
+      portMappings = [
         {
           name          = "nginx"
           containerPort = 8080
@@ -47,9 +47,9 @@ container_definitions = {
           protocol      = "tcp"
         }
       ]
-      memory_reservation = 256
+      memoryReservation      = 256
       readonlyRootFilesystem = false
-      essential          = true
+      essential              = true
     }
   }
   tags = {
