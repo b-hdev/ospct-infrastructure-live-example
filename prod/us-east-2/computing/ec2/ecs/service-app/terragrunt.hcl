@@ -21,6 +21,10 @@ inputs = {
 
   launch_type = "EC2"
 
+  # Define que a Task Definition é compatível com EC2 (e não Fargate)
+  requires_compatibilities = ["EC2"]
+
+
   #N- Copias
   desired_count = 1
 
@@ -44,6 +48,7 @@ container_definitions = {
         }
       ]
       memory_reservation = 256
+      readonlyRootFilesystem = false
       essential          = true
     }
   }
