@@ -14,6 +14,10 @@ dependency "vpc" {
   config_path = "../../../networking/vpc/vpc-ospct"
 }
 
+dependency "secrets" {
+  config_path = "../../../security/secrets-manager/app-secrets"
+}
+
 inputs = {
   name = "nginx-fargate-app"
   cluster_arn = dependency.cluster.outputs.arn
@@ -27,6 +31,11 @@ inputs = {
   # REDE FARGATE: Coloca o container na subnet pública com IP público próprio
   subnet_ids       = dependency.vpc.outputs.public_subnets
   assign_public_ip = true
+
+  # Secret ARNs para o container acessar
+  task_exec_secret_arns = [
+    dependency.secrets.outputs.secret_arn
+  ]
 
   create_security_group = true
   security_group_ingress_rules = {
@@ -54,6 +63,16 @@ inputs = {
           name          = "nginx"
           containerPort = 8080
           protocol      = "tcp"
+        }
+      ]
+      secrets = [
+        {
+          name = "API_KEY"
+          valueFrom = "${dependency.secrets.outputs.secret_arn}:api_key::"
+        },
+        {
+          name = "JWT_SECRET"
+          valueFrom = "${dependency.secrets.outputs.secret_arn}:jwt_secret::"
         }
       ]
       readonlyRootFilesystem = false
