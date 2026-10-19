@@ -13,12 +13,14 @@ prod/us-east-2/
 │   └── security-groups/rds-sg        → Security Group do RDS (libera porta 5432 para EC2)
 ├── computing/
 │   ├── ec2/instance-01               → EC2 Standalone / Bastion (public subnet)
-│   └── ec2/ecs/
-│       ├── cluster/                  → ECS Cluster (ospct-ecs-cluster + CloudWatch Logs)
-│       ├── ec2-node/                 → EC2 Container Instance (AMI ECS-optimized, IAM Role, UserData)
-│       └── service-app/              → ECS Service + Task Definition (Nginx Unprivileged na porta 8080)
+│   ├── ec2/ecs/                      → ECS clássico com instâncias EC2 gerenciadas (cluster, ec2-node, service-app)
+│   └── ecs-fargate/
+│       ├── cluster/                  → ECS Cluster Serverless (ospct-fargate-cluster + Spot)
+│       └── service-app/              → Task Definition + Service Fargate (awsvpc na porta 8080)
+├── security/
+│   └── secrets-manager/app-secrets   → Cofre de credenciais da aplicação (API keys, JWT)
 ├── database/
-│   └── rds/                          → PostgreSQL RDS Standalone (private subnets)
+│   └── rds/                          → PostgreSQL RDS com master password gerenciada no Secrets Manager
 └── message/
     └── sqs/queue-01/                 → Fila SQS padrão (módulo local)
 ```
@@ -97,6 +99,17 @@ tg apply
 
 # 4.3. Task Definition e Service (Nginx na porta 8080)
 cd prod/us-east-2/computing/ec2/ecs/service-app
+tg apply
+```
+
+### 5. Stack ECS com Fargate (Serverless - Sem EC2)
+```bash
+# 5.1. Cluster Fargate com Capacity Providers (Fargate + Spot)
+cd prod/us-east-2/computing/ecs-fargate/cluster
+tg apply
+
+# 5.2. Task Definition e Service Fargate direto na VPC (awsvpc na porta 8080)
+cd prod/us-east-2/computing/ecs-fargate/service-app
 tg apply
 ```
 
