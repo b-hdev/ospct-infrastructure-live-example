@@ -10,10 +10,6 @@ dependency "vpc" {
   config_path = "../../networking/vpc/vpc-ospct"
 }
 
-dependency "ec2" {
-  config_path = "../../computing/ec2/instance-01"
-}
-
 dependency "rds_sg" {
   config_path = "../../networking/security-groups/rds-sg"
 }
@@ -33,7 +29,8 @@ inputs = {
   db_name  = "appdb"
   username = "dbadmin"
   port     = 5432
-  password = "SuaPasswordSegura123!"
+
+  manage_master_user_password = true
 
   create_db_subnet_group = true
   subnet_ids             = dependency.vpc.outputs.private_subnets
@@ -47,5 +44,7 @@ inputs = {
   tags = {
     Terraform   = "true"
     Environment = "dev"
+    ManagedBy   = "Terragrunt"
+    Project     = "ospct"
   }
 }
