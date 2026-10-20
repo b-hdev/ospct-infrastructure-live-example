@@ -1,0 +1,15 @@
+{
+  "name": "ospct-cloud-app",
+  "version": "1.0.0",
+  "description": "OSPCT Cloud Application - Health check and status server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:prod": "NODE_ENV=production node server.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "private": true,
+  "license": "UNLICENSED"
+}

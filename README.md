@@ -1,6 +1,6 @@
 # OSPCT Infrastructure - Arquitetura & Guia de Execução
 
-Repositório de infraestrutura AWS corporativa orquestrado com **Terragrunt** e **Terraform**, padronizado de acordo com as melhores práticas de segurança, isolamento em camadas e automação (referência Statpay).
+Repositório de infraestrutura AWS corporativa orquestrado com **Terragrunt** e **Terraform**, com pipeline CI/CD automatizado via **GitHub Actions** e autenticação federada **OIDC**. Padronizado de acordo com as melhores práticas de segurança, isolamento em camadas e automação (referência Statpay).
 
 ---
 
@@ -18,9 +18,10 @@ prod/us-east-2/
 │   ├── ec2/ecs/                      → ECS clássico com instâncias EC2 gerenciadas (cluster, ec2-node, service-app)
 │   └── ecs-fargate/
 │       ├── cluster/                  → ECS Cluster Serverless (ospct-fargate-cluster + Container Insights)
-│       └── service-app/              → Service Fargate 100% privado atrás do ALB (sem IP público)
+│       └── service-app/              → Service Fargate 100% privado atrás do ALB (imagem ECR, sem IP público)
 ├── security/
 │   ├── acm-certificate/              → Certificado SSL/TLS (X.509 RSA-2048) registrado no AWS ACM para o ALB
+│   ├── github-oidc/                  → OIDC Federation GitHub Actions → AWS (IAM Role + Policies, zero Access Keys)
 │   └── secrets-manager/app-secrets   → Cofre de credenciais da aplicação (API keys, JWT, db credentials)
 ├── database/
 │   ├── rds/                          → PostgreSQL RDS padrão corporativo (db.t4g.micro, Free Tier elegível)
@@ -31,6 +32,19 @@ prod/us-east-2/
 └── message/
     ├── sqs/queue-01/                 → Fila SQS padrão com criptografia SSE gerenciada
     └── ses/                          → Amazon SES Email Identity para envio transacional seguro
+
+modules/
+├── self-signed-cert/                 → Módulo Terraform: Certificado autoassinado (TLS + ACM import)
+└── github-oidc/                      → Módulo Terraform: OIDC Provider + IAM Role para GitHub Actions
+
+app/
+├── Dockerfile                        → Multi-stage build production-grade (Alpine, non-root, dumb-init)
+├── .dockerignore                     → Defense-in-depth (bloqueia .env, .git, secrets do build context)
+├── server.js                         → Servidor Node.js HTTP (health check + status na porta 8080)
+└── package.json                      → Metadata e scripts da aplicação
+
+.github/workflows/
+└── deploy.yml                        → Pipeline CI/CD: Build → Push ECR → Deploy ECS Fargate
 ```
 
 ---
@@ -97,6 +111,43 @@ prod/us-east-2/
 
 ---
 
+## 🔄 Pipeline CI/CD (GitHub Actions → ECR → ECS Fargate)
+
+```
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                         GITHUB ACTIONS PIPELINE                            │
+  │                    (.github/workflows/deploy.yml)                          │
+  └─────────────────────────────────────────────────────────────────────────────┘
+
+  Push na main (app/**)     ──ou──     Workflow Dispatch (manual)
+          │
+          ▼
+  ┌──────────────┐    OIDC JWT     ┌──────────────────────────┐
+  │   Checkout   │───────────────►│  AWS STS AssumeRole      │
+  │   Código     │                │  (credenciais temporárias)│
+  └──────────────┘                └────────────┬─────────────┘
+                                               │
+          ┌────────────────────────────────────┘
+          ▼
+  ┌──────────────┐     ┌──────────────┐     ┌──────────────────────┐
+  │  ECR Login   │────►│ Docker Build │────►│  Push ECR            │
+  │  (token 12h) │     │ Multi-stage  │     │  Tags: SHA + latest  │
+  └──────────────┘     └──────────────┘     └──────────┬───────────┘
+                                                       │
+          ┌────────────────────────────────────────────┘
+          ▼
+  ┌────────────────────┐     ┌───────────────────┐     ┌──────────────┐
+  │ Download Task Def  │────►│  Update Image     │────►│  Deploy ECS  │
+  │ (preserva config)  │     │  (apenas imagem)  │     │  + Stability │
+  └────────────────────┘     └───────────────────┘     └──────────────┘
+```
+
+**Autenticação:** OIDC Federation (módulo `security/github-oidc/`) — sem Access Keys estáticas.
+**Rastreabilidade:** Cada imagem é taggeada com o SHA do commit (7 chars).
+**Segurança:** Trust policy restringe por repositório + branch main.
+
+---
+
 ## 🔐 Políticas de Segurança: Produção vs Laboratório
 
 Para manter a conformidade corporativa e garantir que configurações de estudo não vazem para produção real, adotamos os seguintes padrões:
@@ -110,6 +161,27 @@ Para manter a conformidade corporativa e garantir que configurações de estudo 
 | **Certificado SSL/TLS (ACM)** | Validado por DNS no Route 53 | Autoassinado importado no ACM | Criptografa tráfego TLS 1.3 sem exigir domínio registrado previamente. |
 | **Variáveis de Ambiente (`.env`)** | **Sem fallback padrão (Fail-Fast)** | **Sem fallback padrão (Fail-Fast)** | Aborta na hora se segredos como `APP_API_KEY` ou `AWS_ACCOUNT_ID` faltarem. |
 | **Mocks em dependências** | Restritos a `["validate", "init"]` | Restritos a `["validate", "init"]` | Impede que `plan` ou `apply` rodem com IDs fictícios em contas reais. |
+| **Autenticação CI/CD** | **OIDC Federation** (zero Access Keys) | **OIDC Federation** (zero Access Keys) | Credenciais temporárias via STS, auditáveis no CloudTrail, sem secrets estáticos. |
+| **Dockerfile** | **Multi-stage, non-root, dumb-init** | **Multi-stage, non-root, dumb-init** | Superfície de ataque mínima (Alpine ~5MB), signal handling correto, UID 1001 dedicado. |
+
+---
+
+## 🔑 Variáveis de Ambiente Obrigatórias
+
+Todas as informações sensíveis ou identificáveis são lidas de variáveis de ambiente via `get_env()` (fail-fast). **Nenhum dado é hardcoded nos arquivos de configuração.**
+
+```bash
+# Exportar ANTES de rodar qualquer comando terragrunt
+export AWS_ACCOUNT_ID="<seu-account-id-aws-12-digitos>"
+export GITHUB_ORG="<seu-usuario-ou-org-github>"
+export GITHUB_REPO="<nome-do-repositorio>"
+```
+
+| Variável | Onde é usada | Falha se ausente |
+| :--- | :--- | :--- |
+| `AWS_ACCOUNT_ID` | `prod/account.hcl` → remote state S3 bucket | ✅ Sim (fail-fast) |
+| `GITHUB_ORG` | `security/github-oidc/` → trust policy OIDC | ✅ Sim (fail-fast) |
+| `GITHUB_REPO` | `security/github-oidc/` → trust policy OIDC | ✅ Sim (fail-fast) |
 
 ---
 
@@ -149,6 +221,11 @@ terragrunt apply --auto-approve
 # 2.4. Identidade de E-mail (Amazon SES)
 cd prod/us-east-2/message/ses
 terragrunt apply --auto-approve
+
+# 2.5. OIDC Federation GitHub Actions → AWS (IAM Role para CI/CD)
+cd prod/us-east-2/security/github-oidc
+terragrunt apply --auto-approve
+# ⚠️  Após apply, copie o output 'role_arn' e adicione como GitHub Secret: AWS_ROLE_ARN
 ```
 
 ### 3. Camada de Dados e Bastion Seguro
@@ -188,6 +265,14 @@ terragrunt apply --auto-approve
 # 4.4. Alarme CloudWatch para High CPU (> 80%) com disparo para o SNS
 cd prod/us-east-2/observability/cloudwatch-alarms
 terragrunt apply --auto-approve
+
+# 4.5. Push da primeira imagem Docker para o ECR (necessário antes do ECS iniciar)
+cd app
+docker build -t ospct-app .
+ECR_URL=$(cd ../prod/us-east-2/computing/ecr/app-repo && terragrunt output -raw repository_url)
+aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin "${ECR_URL%%/*}"
+docker tag ospct-app:latest "${ECR_URL}:latest"
+docker push "${ECR_URL}:latest"
 ```
 
 ---
@@ -202,6 +287,10 @@ cd prod/us-east-2/observability/cloudwatch-alarms
 terragrunt destroy --auto-approve
 
 cd prod/us-east-2/observability/sns-alerts
+terragrunt destroy --auto-approve
+
+# 0.5. OIDC Federation (GitHub Actions)
+cd prod/us-east-2/security/github-oidc
 terragrunt destroy --auto-approve
 
 # 1. Serviço e Cluster ECS Fargate
@@ -290,12 +379,28 @@ psql -h localhost -p 5432 -U dbadmin -d appdb
 
 ### 3. Push de Imagem no Repositório Privado AWS ECR
 ```bash
-# 1. Login no ECR
-aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 248557779673.dkr.ecr.us-east-2.amazonaws.com
+# 1. Obter o URL do ECR dinamicamente (sem hardcoding de Account ID)
+ECR_URL=$(cd prod/us-east-2/computing/ecr/app-repo && terragrunt output -raw repository_url)
 
-# 2. Tag e Push de imagem com scan automático de vulnerabilidades
-docker tag minha-app:latest 248557779673.dkr.ecr.us-east-2.amazonaws.com/ospct-app-repo:latest
-docker push 248557779673.dkr.ecr.us-east-2.amazonaws.com/ospct-app-repo:latest
+# 2. Login no ECR
+aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin "${ECR_URL%%/*}"
+
+# 3. Build, Tag e Push (com scan automático de vulnerabilidades)
+cd app
+docker build -t ospct-app .
+docker tag ospct-app:latest "${ECR_URL}:latest"
+docker push "${ECR_URL}:latest"
+```
+
+### 4. Testar Pipeline CI/CD (GitHub Actions)
+```bash
+# Qualquer push na branch main com alterações em app/ dispara o pipeline:
+git add app/
+git commit -m "feat: deploy via CI/CD"
+git push origin main
+
+# Acompanhe em: https://github.com/<org>/<repo>/actions
+# O pipeline faz: Build → Push ECR (tag SHA) → Deploy ECS → Wait Stability
 ```
 
 ---
@@ -312,3 +417,9 @@ docker push 248557779673.dkr.ecr.us-east-2.amazonaws.com/ospct-app-repo:latest
    - Contas sob o plano Free Tier da AWS impõem a restrição `WithExpressConfiguration` para provisionar clusters Aurora. Para contas nessa modalidade, o módulo `rds/` (`db.t4g.micro`) é a escolha recomendada por ser 100% suportada sem restrições.
 5. **Ciclo de Vida para Teardown Rápido**:
    - Parâmetros como `enable_deletion_protection = false`, `skip_final_snapshot = true` e `recovery_window_in_days = 0` garantem que o `terragrunt destroy` limpe a conta integralmente sem custos residuais após sessões de estudo.
+6. **CI/CD com OIDC Federation (Zero Access Keys)**:
+   - O GitHub Actions autentica na AWS via OpenID Connect, trocando um JWT temporário por credenciais STS de curta duração. Elimina completamente a necessidade de `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` como secrets estáticos no GitHub.
+7. **Dockerfile Multi-Stage Production-Grade**:
+   - Imagem Alpine mínima (~5MB), usuário non-root dedicado (UID 1001), `dumb-init` para signal handling correto (PID 1 problem), `npm ci --omit=dev` para builds determinísticos, HEALTHCHECK nativo, e COPY seletivo (nunca `COPY . .`).
+8. **Fail-Fast para Variáveis de Ambiente**:
+   - Todas as informações sensíveis (`AWS_ACCOUNT_ID`, `GITHUB_ORG`, `GITHUB_REPO`) são lidas via `get_env()` sem fallback. Se alguma estiver ausente, o Terragrunt aborta imediatamente com erro explícito antes de qualquer operação.

@@ -1,0 +1,244 @@
+# =============================================================================
+# GitHub Actions - CI/CD Pipeline: Build → Push ECR → Deploy ECS Fargate
+# =============================================================================
+#
+# FLUXO DO PIPELINE:
+# ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+# │ Checkout │───▶│  Build   │───▶│ Push ECR │───▶│  Deploy  │
+# │   Code   │    │  Docker  │    │  Image   │    │   ECS    │
+# └──────────┘    └──────────┘    └──────────┘    └──────────┘
+#
+# TRIGGERS:
+#   - Push na branch main (apenas alterações em app/)
+#   - Workflow manual via GitHub UI (workflow_dispatch)
+#
+# SEGURANÇA:
+#   ✅ OIDC Federation (sem access keys estáticas no GitHub)
+#   ✅ Permissões mínimas (least privilege)
+#   ✅ Imagem taggeada com SHA do commit (rastreabilidade)
+#   ✅ Scan de vulnerabilidades via ECR (habilitado no repo)
+#   ✅ Concurrency control (evita deploys simultâneos)
+#
+# SECRETS NECESSÁRIOS NO GITHUB:
+#   - AWS_ACCOUNT_ID: ID da conta AWS (Settings → Secrets → Actions)
+#   - AWS_ROLE_ARN: ARN do IAM Role para OIDC (ou configurar inline)
+#
+# NOTA: Se OIDC não estiver configurado, use a alternativa com
+#       AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY (menos seguro).
+# =============================================================================
+
+name: Deploy to AWS ECS Fargate
+
+# ── Triggers ────────────────────────────────────────────────────────
+on:
+  push:
+    branches:
+      - main
+    paths:
+      # Só executa quando há mudanças na aplicação (não infra)
+      - 'app/**'
+  
+  # Permite execução manual pelo GitHub UI
+  workflow_dispatch:
+
+# ── Concurrency ─────────────────────────────────────────────────────
+# Evita que dois deploys rodem simultaneamente na mesma branch
+# cancel-in-progress: cancela o deploy anterior se um novo push acontecer
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+# ── Permissões ──────────────────────────────────────────────────────
+# Princípio de menor privilégio:
+#   - id-token: write → necessário para OIDC Federation com AWS
+#   - contents: read → necessário para checkout do código
+permissions:
+  id-token: write
+  contents: read
+
+# ── Variáveis de Ambiente (globais) ─────────────────────────────────
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: ospct-app-repo
+  ECS_CLUSTER: ospct-fargate-cluster
+  ECS_SERVICE: nginx-fargate-app
+  CONTAINER_NAME: nginx
+  CONTAINER_PORT: 8080
+
+# =============================================================================
+# JOBS
+# =============================================================================
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # Job: build-and-deploy
+  # ─────────────────────────────────────────────────────────────────
+  # PROPÓSITO: Build da imagem Docker, push para ECR, e deploy no ECS.
+  #
+  # POR QUE UM ÚNICO JOB (e não separado)?
+  #   Para aplicações simples, um único job evita overhead de:
+  #   - Transferência de artefatos entre jobs
+  #   - Tempo de startup de runners adicionais
+  #   - Complexidade desnecessária
+  #
+  #   Para apps maiores com testes, lint, etc., separe em jobs distintos.
+  # ─────────────────────────────────────────────────────────────────
+  build-and-deploy:
+    name: Build, Push & Deploy
+    runs-on: ubuntu-latest
+    
+    # Apenas deploys na branch main (segurança contra PRs maliciosos)
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      # ── Step 1: Checkout do código ──────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Step 2: Autenticação AWS via OIDC ───────────────────────
+      # OIDC Federation: O GitHub Actions troca um token JWT temporário
+      # por credenciais AWS de curta duração (15min-1h).
+      #
+      # VANTAGEM sobre Access Keys:
+      #   - Sem secrets estáticos que podem vazar
+      #   - Credenciais expiram automaticamente
+      #   - Auditável via CloudTrail
+      #
+      # PRÉ-REQUISITO: Configurar IAM OIDC Provider + IAM Role na AWS
+      # Doc: https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
+      #
+      # ┌─────────────────────────────────────────────────────────┐
+      # │ ALTERNATIVA: Se OIDC não estiver configurado, comente  │
+      # │ este step e descomente o Step 2b abaixo.               │
+      # └─────────────────────────────────────────────────────────┘
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ── Step 2b (ALTERNATIVA): Autenticação via Access Keys ─────
+      # ⚠️  MENOS SEGURO: Use apenas se OIDC não estiver disponível.
+      #     Access Keys são secrets estáticos que precisam de rotação manual.
+      #
+      # Para usar esta alternativa:
+      #   1. Comente o Step 2 acima
+      #   2. Descomente o bloco abaixo
+      #   3. Adicione AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY nos GitHub Secrets
+      #
+      # - name: Configure AWS Credentials (Access Keys)
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     aws-region: ${{ env.AWS_REGION }}
+
+      # ── Step 3: Login no Amazon ECR ─────────────────────────────
+      # Autentica o Docker daemon com o ECR registry para poder
+      # fazer push de imagens. O token expira em 12 horas.
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ── Step 4: Build e Tag da imagem Docker ────────────────────
+      # Tags aplicadas:
+      #   - SHA do commit (7 chars): rastreabilidade exata do código
+      #   - "latest": conveniência para deploys manuais
+      #
+      # POR QUE SHA e não apenas "latest"?
+      #   - "latest" é mutável e não garante qual versão está rodando
+      #   - SHA permite rollback para qualquer commit específico
+      #   - SHA torna o deploy auditável e reproduzível
+      - name: Build Docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Gera short SHA para tags legíveis (7 caracteres)
+          SHORT_SHA=$(echo "$IMAGE_TAG" | cut -c1-7)
+          
+          # Build com cache otimizado e metadata
+          docker build \
+            --tag "$ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_SHA" \
+            --tag "$ECR_REGISTRY/$ECR_REPOSITORY:latest" \
+            --label "git.commit=$IMAGE_TAG" \
+            --label "git.branch=${{ github.ref_name }}" \
+            --label "build.timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --label "build.run_id=${{ github.run_id }}" \
+            ./app
+          
+          # Exporta variáveis para steps seguintes
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      # ── Step 5: Push da imagem para o ECR ───────────────────────
+      # Envia ambas as tags (SHA + latest) para o registry
+      - name: Push image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.build-image.outputs.short_sha }}"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+          
+          echo "✅ Imagem publicada: $ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.build-image.outputs.short_sha }}"
+
+      # ── Step 6: Obter Task Definition atual do ECS ──────────────
+      # POR QUE baixar a task definition ao invés de criar do zero?
+      #   - Preserva configurações existentes (secrets, env vars, IAM roles)
+      #   - Apenas atualiza a imagem do container
+      #   - Evita drift entre infraestrutura (Terragrunt) e CI/CD
+      - name: Download current ECS task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$ECS_SERVICE" \
+            --query 'taskDefinition' \
+            --output json > task-definition.json
+          
+          echo "📋 Task definition atual baixada com sucesso"
+
+      # ── Step 7: Atualizar imagem na Task Definition ─────────────
+      # Substitui apenas a imagem do container especificado,
+      # mantendo todas as outras configurações intactas.
+      - name: Update container image in task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.image }}
+
+      # ── Step 8: Deploy no ECS Fargate ───────────────────────────
+      # Registra a nova task definition e atualiza o service.
+      #
+      # wait-for-service-stability: true
+      #   O step aguarda até que o ECS confirme que:
+      #   - A nova task está RUNNING
+      #   - O health check do ALB está passando
+      #   - A task antiga foi drenada e removida
+      #
+      # Se falhar, o ECS faz rollback automático para a versão anterior
+      # (configurável via deployment circuit breaker no Terragrunt).
+      - name: Deploy to Amazon ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      # ── Step 9: Sumário do deploy ───────────────────────────────
+      # Gera um relatório visual no GitHub Actions Summary
+      - name: Deploy summary
+        if: success()
+        run: |
+          echo "## 🚀 Deploy realizado com sucesso!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Imagem** | \`${{ steps.build-image.outputs.image }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ steps.build-image.outputs.short_sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cluster** | \`${{ env.ECS_CLUSTER }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Service** | \`${{ env.ECS_SERVICE }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Região** | \`${{ env.AWS_REGION }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered by** | \`${{ github.actor }}\` |" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,61 @@
+# =============================================================================
+# .dockerignore - OSPCT Cloud App
+# =============================================================================
+# PROPÓSITO: Impedir que arquivos sensíveis ou desnecessários entrem no
+#            contexto de build do Docker. Mesmo com COPY seletivo no Dockerfile,
+#            o .dockerignore é uma camada extra de segurança (defense in depth).
+#
+# SEM ESTE ARQUIVO, o Docker envia TODOS os arquivos do diretório como
+# "build context", aumentando tempo de build e risco de vazamento.
+# =============================================================================
+
+# ── Git ─────────────────────────────────────────────────────────────
+.git
+.gitignore
+
+# ── Docker ──────────────────────────────────────────────────────────
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# ── Node.js ─────────────────────────────────────────────────────────
+node_modules
+npm-debug.log*
+yarn-error.log*
+
+# ── Environment & Secrets ───────────────────────────────────────────
+# CRÍTICO: Nunca enviar variáveis de ambiente ou secrets para o build
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# ── IDE & OS ────────────────────────────────────────────────────────
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Documentação & Testes ───────────────────────────────────────────
+README.md
+docs/
+test/
+tests/
+__tests__
+coverage/
+*.test.js
+*.spec.js
+
+# ── CI/CD ───────────────────────────────────────────────────────────
+.github
+.gitlab-ci.yml
+Jenkinsfile
+
+# ── Terraform/Terragrunt (caso o build context seja o repo root) ───
+*.tf
+*.hcl
+.terraform
+.terragrunt-cache

@@ -22,6 +22,16 @@ dependency "alb" {
   config_path = "../../../networking/alb-public"
 }
 
+dependency "ecr" {
+  config_path = "../../ecr/app-repo"
+
+  # Mock para validate/init
+  mock_outputs_allowed_terraform_commands = ["validate", "init"]
+  mock_outputs = {
+    repository_url = "000000000000.dkr.ecr.us-east-2.amazonaws.com/mock-repo"
+  }
+}
+
 inputs = {
   name = "nginx-fargate-app"
   cluster_arn = dependency.cluster.outputs.arn
@@ -65,10 +75,15 @@ inputs = {
       ip_protocol = "-1"
     }
   }
-  # DEFINIÇÃO DO CONTAINER DOCKER
+
+  # ── DEFINIÇÃO DO CONTAINER DOCKER ─────────────────────────────────
+  # IMAGEM: ECR repository (ospct-app-repo)
+  #   - Tag "latest" é o default para o deploy inicial via Terragrunt
+  #   - O CI/CD (GitHub Actions) sobrescreve com o SHA do commit a cada deploy
+  #   - Isso garante rastreabilidade: cada deploy é vinculado a um commit exato
   container_definitions = {
     nginx = {
-      image = "nginxinc/nginx-unprivileged:1.31-alpine"
+      image = "${dependency.ecr.outputs.repository_url}:latest"
       # No modo Fargate (awsvpc), definimos apenas a porta interna do container
       portMappings = [
         {
