@@ -1,6 +1,6 @@
-# OSPCT Infrastructure - Sequência de Execução & Arquitetura
+# OSPCT Infrastructure - Arquitetura & Guia de Execução
 
-Repositório de infraestrutura AWS orquestrado com **Terragrunt** e **Terraform**.
+Repositório de infraestrutura AWS corporativa orquestrado com **Terragrunt** e **Terraform**, padronizado de acordo com as melhores práticas de segurança, isolamento em camadas e automação (referência Statpay).
 
 ---
 
@@ -9,278 +9,258 @@ Repositório de infraestrutura AWS orquestrado com **Terragrunt** e **Terraform*
 ```
 prod/us-east-2/
 ├── networking/
-│   ├── vpc/vpc-ospct                 → VPC, Subnets (públicas e privadas), NAT Gateway
-│   ├── alb-public/                   → Application Load Balancer público (porta 80 HTTP, entrada controlada)
-│   └── security-groups/rds-sg        → Security Group do RDS (libera porta 5432 para EC2)
+│   ├── vpc/vpc-ospct                 → VPC (10.0.0.0/16), 9 Subnets (Públicas, Privadas, Banco), NAT Gateway e IGW
+│   ├── alb-public/                   → Application Load Balancer público (Porta 80 HTTP, entrada controlada)
+│   └── security-groups/rds-sg        → Security Group restritivo do RDS (5432 exclusivo para o Bastion SSM)
 ├── computing/
-│   ├── ecr/app-repo                  → Repositório Docker privado com scan de vulnerabilidades e retenção de imagens
+│   ├── ecr/app-repo                  → Repositório Docker privado com scan de vulnerabilidades (CVE) e retenção
 │   ├── ec2/instance-01               → EC2 Bastion em subnet privada com AWS SSM (sem IP público nem SSH)
 │   ├── ec2/ecs/                      → ECS clássico com instâncias EC2 gerenciadas (cluster, ec2-node, service-app)
 │   └── ecs-fargate/
-│       ├── cluster/                  → ECS Cluster Serverless (ospct-fargate-cluster + Spot)
+│       ├── cluster/                  → ECS Cluster Serverless (ospct-fargate-cluster + Container Insights)
 │       └── service-app/              → Service Fargate 100% privado atrás do ALB (sem IP público)
 ├── security/
-│   └── secrets-manager/app-secrets   → Cofre de credenciais da aplicação (API keys, JWT)
+│   └── secrets-manager/app-secrets   → Cofre de credenciais da aplicação (API keys, JWT, db credentials)
 ├── database/
-│   ├── rds/                          → PostgreSQL RDS tradicional (mono-instância)
-│   └── aurora-serverless-v2/         → Amazon Aurora PostgreSQL Serverless v2 (0.5 a 2.0 ACUs)
+│   ├── rds/                          → PostgreSQL RDS padrão corporativo (db.t4g.micro, Free Tier elegível)
+│   └── aurora-serverless-v2/         → Amazon Aurora PostgreSQL Serverless v2 (Cluster com 0.5 a 2.0 ACUs)
 ├── observability/
-│   └── cloudwatch-alarms/            → Alarmes de métricas (High CPU no ECS Fargate)
+│   └── cloudwatch-alarms/            → Alarme CloudWatch de métricas (High CPU no ECS Fargate > 80%)
 └── message/
-    ├── sqs/queue-01/                 → Fila SQS padrão (módulo local)
-    └── ses/                          → Amazon SES Email Identity para envio transacional (módulo local)
+    ├── sqs/queue-01/                 → Fila SQS padrão com criptografia SSE gerenciada
+    └── ses/                          → Amazon SES Email Identity para envio transacional seguro
 ```
 
 ---
 
-## 📊 Diagrama de Dependências
+## 📊 Diagrama de Fluxo e Segurança em Camadas
 
 ```
-                        ┌─────────────┐
-                        │     VPC     │
-                        └──────┬──────┘
-             ┌─────────────────┼──────────────────────────┐
-             │                 │                          │
-             ▼                 ▼                          ▼
-      ┌──────────────┐   ┌────────────┐            ┌──────────────┐
-      │  EC2 Stand.  │   │  RDS SG    │            │  ECS Cluster │
-      │(instance-01) │   └─────┬──────┘            │(EC2 / Fargate│
-      └──────┬───────┘         │                   └──────┬───────┘
-             └────────┬────────┘                          │
-                      ▼                                   ▼
-               ┌─────────────┐                     ┌──────────────┐
-               │   RDS DB    │                     │ ECS Service  │
-               └─────────────┘                     │(Task Def 8080│
-                                                   └──────┬───────┘
-                                                          │ (injeta segredos)
- ┌──────────────────────┐                          ┌──────▼───────┐
- │   Mensageria AWS     │                          │Secrets Manager
- │  SQS  │     SES      │                          │(app-secrets) │
- └───────┴──────────────┘                          └──────────────┘
+                        ┌───────────────────────────────┐
+                        │      INTERNET PÚBLICA         │
+                        └──────────────┬────────────────┘
+                                       │ (HTTP 80)
+                                       ▼
+                        ┌───────────────────────────────┐
+                        │  Application Load Balancer    │  ◄── Subnets Públicas
+                        │         (alb-public)          │      (10.0.101-103.0/24)
+                        └──────────────┬────────────────┘
+                                       │ Encaminha tráfego
+                                       │ (Porta 8080 interna)
+                                       ▼
+                        ┌───────────────────────────────┐
+                        │     ECS Fargate Service       │  ◄── Subnets Privadas
+                        │       (nginx-fargate-app)     │      (10.0.1-3.0/24)
+                        └───────┬───────────────┬───────┘      (Sem IP público!)
+                                │               │
+              Puxa credenciais  │               │ Puxa imagens
+                                ▼               ▼
+                    ┌──────────────────┐  ┌──────────────────┐
+                    │ Secrets Manager  │  │ AWS ECR App Repo │
+                    │  (app-secrets)   │  │ (ospct-app-repo) │
+                    └──────────────────┘  └──────────────────┘
+
+   ─────────────────────────────────────────────────────────────────────────────
+   Acesso Administrativo ao Banco (Zero Portas Expostas para a Internet):
+
+   Operador Local
+         │
+         │ (Túnel Criptografado AWS SSM - Sem SSH / Sem Porta 22)
+         ▼
+   ┌──────────────────────────────┐
+   │    EC2 Bastion SSM Tunnel    │  ◄── Subnet Privada (10.0.1.0/24)
+   │  (ec2-ssm-database-tunnel)   │      SG restrito sem portas de entrada
+   └──────────────┬───────────────┘
+                  │
+                  │ Tráfego TCP 5432 exclusivo (rds-sg)
+                  ▼
+   ┌──────────────────────────────┐
+   │   PostgreSQL RDS Database    │  ◄── Subnets de Banco Isoladas
+   │    (ospct-rds-postgres)      │      (10.0.201-203.0/24)
+   └──────────────────────────────┘
 ```
 
 ---
 
-## 🚀 Apply (Criar Infraestrutura)
+## 🚀 Sequência de Apply (Criar Infraestrutura)
 
-Execute na ordem de dependência — os componentes base primeiro:
+Para respeitar as dependências de rede e segurança, aplique na ordem abaixo:
 
-### 1. Rede Base
+### 1. Camada de Rede Base
 ```bash
-# 1.1. VPC, Subnets públicas/privadas e NAT Gateway
+# 1.1. VPC com subnets públicas, privadas, database e NAT Gateway
 cd prod/us-east-2/networking/vpc/vpc-ospct
-tg apply
+terragrunt apply --auto-approve
 
 # 1.2. Application Load Balancer Público (Entrada controlada da aplicação)
 cd prod/us-east-2/networking/alb-public
-tg apply
+terragrunt apply --auto-approve
 ```
 
-### 2. Segurança e Mensageria (Independentes de VPC)
+### 2. Segurança, Registry e Mensageria
 ```bash
-# 2.1. Cofre de Segredos (Secrets Manager)
+# 2.1. Cofre de Segredos da Aplicação (Secrets Manager)
 cd prod/us-east-2/security/secrets-manager/app-secrets
-tg apply
+terragrunt apply --auto-approve
 
-# 2.2. Fila SQS
-cd prod/us-east-2/message/sqs/queue-01
-tg apply
-
-# 2.3. Identidade de E-mail no SES (envio transacional)
-cd prod/us-east-2/message/ses
-tg apply
-
-# 2.4. Repositório Privado de Containers (AWS ECR)
+# 2.2. Repositório Privado de Imagens Docker (AWS ECR)
 cd prod/us-east-2/computing/ecr/app-repo
-tg apply
+terragrunt apply --auto-approve
+
+# 2.3. Fila de Mensagens (Amazon SQS)
+cd prod/us-east-2/message/sqs/queue-01
+terragrunt apply --auto-approve
+
+# 2.4. Identidade de E-mail (Amazon SES)
+cd prod/us-east-2/message/ses
+terragrunt apply --auto-approve
 ```
 
-### 3. Banco de Dados e Host Bastion Seguro
+### 3. Camada de Dados e Bastion Seguro
 ```bash
-# EC2 Bastion privado com AWS SSM (sem IP público nem porta 22)
+# 3.1. Host Bastion Privado gerenciado via AWS SSM
 cd prod/us-east-2/computing/ec2/instance-01
-tg apply
+terragrunt apply --auto-approve
 
-# Security Group do RDS
+# 3.2. Security Group do Banco de Dados
 cd prod/us-east-2/networking/security-groups/rds-sg
-tg apply
+terragrunt apply --auto-approve
 
-# Opção A: Banco de dados PostgreSQL RDS tradicional
+# 3.3. Banco de Dados PostgreSQL:
+# Opção A: RDS PostgreSQL tradicional (Elegível a Free Tier)
 cd prod/us-east-2/database/rds
-tg apply
+terragrunt apply --auto-approve
 
-# Opção B: Banco de dados Amazon Aurora Serverless v2 (Cluster com auto-scaling)
+# Opção B: Aurora PostgreSQL Serverless v2 (0.5 a 2.0 ACUs)
 cd prod/us-east-2/database/aurora-serverless-v2
-tg apply
+terragrunt apply --auto-approve
 ```
 
-### 4. Stack ECS com EC2
+### 4. Camada de Computação e Observabilidade (ECS Fargate)
 ```bash
-# 4.1. Cluster ECS e CloudWatch Log Group
-cd prod/us-east-2/computing/ec2/ecs/cluster
-tg apply
-
-# 4.2. Instância EC2 Nó do Cluster (registra no cluster via UserData)
-cd prod/us-east-2/computing/ec2/ecs/ec2-node
-tg apply
-
-# 4.3. Task Definition e Service (Nginx na porta 8080)
-cd prod/us-east-2/computing/ec2/ecs/service-app
-tg apply
-```
-
-### 5. Stack ECS com Fargate (Serverless - Subnets Privadas)
-```bash
-# 5.1. Cluster Fargate com Capacity Providers (Fargate + Spot)
+# 4.1. Cluster ECS Fargate com Container Insights
 cd prod/us-east-2/computing/ecs-fargate/cluster
-tg apply
+terragrunt apply --auto-approve
 
-# 5.2. Service Fargate privado integrado ao ALB e ao Secrets Manager
+# 4.2. Serviço Fargate Privado integrado ao ALB e Secrets Manager
 cd prod/us-east-2/computing/ecs-fargate/service-app
-tg apply
+terragrunt apply --auto-approve
 
-# 5.3. Observabilidade e Alarme de CPU do Fargate
+# 4.3. Alarme CloudWatch para High CPU (> 80%)
 cd prod/us-east-2/observability/cloudwatch-alarms
-tg apply
+terragrunt apply --auto-approve
 ```
 
 ---
 
-## 💣 Destroy (Destruir Infraestrutura)
+## 💣 Sequência de Destroy (Destruir Infraestrutura)
 
-Execute rigorosamente na **ordem inversa** — os recursos dependentes primeiro:
+Para desmontar o ambiente sem erros de dependência ou recursos órfãos, execute **rigorosamente na ordem inversa**:
 
 ```bash
-# 0. Observabilidade (Alarme de métrica do Fargate)
+# 0. Alarme do CloudWatch
 cd prod/us-east-2/observability/cloudwatch-alarms
-tg destroy
+terragrunt destroy --auto-approve
 
-# 1. Stack ECS Fargate (remove containers registrados no ALB)
+# 1. Serviço e Cluster ECS Fargate
 cd prod/us-east-2/computing/ecs-fargate/service-app
-tg destroy
+terragrunt destroy --auto-approve
 
 cd prod/us-east-2/computing/ecs-fargate/cluster
-tg destroy
+terragrunt destroy --auto-approve
 
-# 2. Application Load Balancer Público
+# 2. Application Load Balancer
 cd prod/us-east-2/networking/alb-public
-tg destroy
+terragrunt destroy --auto-approve
 
-# 3. Stack ECS com EC2
-cd prod/us-east-2/computing/ec2/ecs/service-app
-tg destroy
-
-cd prod/us-east-2/computing/ec2/ecs/ec2-node
-tg destroy
-
-cd prod/us-east-2/computing/ec2/ecs/cluster
-tg destroy
-
-# 4. Banco de Dados (RDS ou Aurora) e Security Group
-# Se usou RDS:
+# 3. Banco de Dados e Security Group
+# Se utilizou RDS:
 cd prod/us-east-2/database/rds
-tg destroy
+terragrunt destroy --auto-approve
 
-# Se usou Aurora Serverless v2:
+# Se utilizou Aurora Serverless v2:
 cd prod/us-east-2/database/aurora-serverless-v2
-tg destroy
+terragrunt destroy --auto-approve
 
 cd prod/us-east-2/networking/security-groups/rds-sg
-tg destroy
+terragrunt destroy --auto-approve
 
-# 5. EC2 Bastion SSM
+# 4. Host Bastion Seguro
 cd prod/us-east-2/computing/ec2/instance-01
-tg destroy
+terragrunt destroy --auto-approve
 
-# 6. Segurança e Mensageria (SES, SQS, Secrets Manager)
+# 5. Segurança, Registry e Mensageria
 cd prod/us-east-2/message/ses
-tg destroy
+terragrunt destroy --auto-approve
 
 cd prod/us-east-2/message/sqs/queue-01
-tg destroy
-
-cd prod/us-east-2/security/secrets-manager/app-secrets
-tg destroy
+terragrunt destroy --auto-approve
 
 cd prod/us-east-2/computing/ecr/app-repo
-tg destroy
+terragrunt destroy --auto-approve
 
-# 7. VPC e NAT Gateway (base de tudo, destrói por último)
+cd prod/us-east-2/security/secrets-manager/app-secrets
+terragrunt destroy --auto-approve
+
+# 6. VPC, Subnets e NAT Gateway (Base da rede, destrói por último)
 cd prod/us-east-2/networking/vpc/vpc-ospct
-tg destroy
+terragrunt destroy --auto-approve
 ```
 
 ---
 
-## 🔗 Testes de Conectividade e Validação
+## 🔗 Testes e Validação Prática
 
-### 1. Validar a Aplicação Web via ALB (Entrada Controlada)
-Faça a requisição na porta 80 pública do Application Load Balancer, que repassará para o container privado:
+### 1. Teste de Acesso à Aplicação via ALB
+Obtenha o endereço público do Load Balancer e teste a resposta HTTP:
 ```bash
-# Obter o DNS do ALB
+# Obter o DNS público do ALB
 cd prod/us-east-2/networking/alb-public
-tg output dns_name
+ALB_DNS=$(terragrunt output -raw dns_name)
 
-# Testar via curl (deve retornar HTTP 200 do Nginx)
-curl http://<DNS_NAME_DO_ALB>
+# Testar com curl (deve retornar HTTP/1.1 200 OK)
+curl -s -I "http://${ALB_DNS}"
 ```
 
-### 2. Conectar à EC2 Bastion via AWS SSM (Sem SSH e sem IP público)
-```bash
-# Obter o Instance ID da máquina
-cd prod/us-east-2/computing/ec2/instance-01
-tg output id
+### 2. Acesso Seguro ao PostgreSQL via Túnel SSM (Port Forwarding)
+Sem abrir a porta 22 na internet e sem IP público na instância ou no banco, abra um túnel local diretamente para a porta 5432 do PostgreSQL:
 
-# Iniciar sessão segura criptografada
-aws ssm start-session --target <INSTANCE_ID>
+```bash
+# 1. Obter o Instance ID do Bastion e o Endpoint do RDS
+INSTANCE_ID=$(cd prod/us-east-2/computing/ec2/instance-01 && terragrunt output -raw id)
+RDS_ENDPOINT=$(cd prod/us-east-2/database/rds && terragrunt output -raw db_instance_address)
+
+# 2. Iniciar o túnel seguro na sua máquina local (porta 5432)
+aws ssm start-session \
+  --target "${INSTANCE_ID}" \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters "{\"host\":[\"${RDS_ENDPOINT}\"],\"portNumber\":[\"5432\"],\"localPortNumber\":[\"5432\"]}"
+
+# 3. Em outro terminal, conecte com seu cliente favorito (psql, DBeaver, TablePlus):
+psql -h localhost -p 5432 -U dbadmin -d appdb
+```
+
+### 3. Push de Imagem no Repositório Privado AWS ECR
+```bash
+# 1. Login no ECR
+aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 248557779673.dkr.ecr.us-east-2.amazonaws.com
+
+# 2. Tag e Push de imagem com scan automático de vulnerabilidades
+docker tag minha-app:latest 248557779673.dkr.ecr.us-east-2.amazonaws.com/ospct-app-repo:latest
+docker push 248557779673.dkr.ecr.us-east-2.amazonaws.com/ospct-app-repo:latest
 ```
 
 ---
 
-## 🔗 Testes de Conectividade e Validação
+## 💡 Notas de Arquitetura e Decisões Técnicas
 
-### 1. Validar o Container Nginx no ECS
-Obtenha o IP público da instância do ECS e faça uma requisição HTTP na porta 8080:
-```bash
-# Obter o IP público
-cd prod/us-east-2/computing/ec2/ecs/ec2-node
-tg output public_ip
-
-# Testar via curl
-curl http://<IP_PUBLICO_EC2_NODE>:8080
-```
-> Ou abra no navegador: `http://<IP_PUBLICO_EC2_NODE>:8080`
-
-### 2. Validar Conexão EC2 → RDS
-Para testar se a EC2 alcança o PostgreSQL nas subnets privadas:
-```bash
-# De dentro da EC2 instance-01 (via SSH):
-nc -zv meu-rds-db.<id>.us-east-2.rds.amazonaws.com 5432
-```
-
-### 3. Validar e Testar Envio com Amazon SES
-Para verificar o status da identidade e disparar um e-mail de teste:
-```bash
-# 1. Consultar status de verificação (deve retornar "VerificationStatus": "Success")
-aws ses get-identity-verification-attributes \
-  --identities "seu-email@gmail.com" \
-  --region us-east-2
-
-# 2. Disparar e-mail de teste via CLI (dentro do sandbox: de você para você)
-aws ses send-email \
-  --from "seu-email@gmail.com" \
-  --destination "ToAddresses=seu-email@gmail.com" \
-  --message "Subject={Data='Teste SES',Charset=utf-8},Body={Text={Data='Mensagem de teste enviada pelo SES.',Charset=utf-8}}" \
-  --region us-east-2
-```
-
----
-
-## ⚠️ Observações e Boas Práticas
-
-- **Credenciais AWS**: renove a sessão antes de executar comandos (`aws login` ou `aws sso login`).
-- **AMI Dinâmica do ECS**: O nó do ECS utiliza `ami_ssm_parameter` para puxar sempre a versão oficial mais recente da Amazon Linux 2023 ECS-Optimized sem depender de AMI IDs estáticos.
-- **Portas e Non-Root**: O container utiliza `nginxinc/nginx-unprivileged:1.31-alpine` com `network_mode = bridge` na porta `8080:8080` para maior segurança.
-- **Dimensionamento de Recursos (ECS)**: O container Nginx está fixado em `256` CPU units e `128 MB` de memória (`memoryReservation = 128`). Como o consumo real do Nginx raramente passa de 30-50 MB, 128 MB garante estabilidade sob alta carga e viabiliza *Rolling Updates* seguros dentro de uma única instância `t3.micro` (~950 MB livres) sem esgotar a RAM da máquina.
-- **Custos**: O **NAT Gateway** é o recurso mais oneroso (~$32/mês). Lembre-se de destruí-lo com `tg destroy` na VPC quando o ambiente de estudos não estiver em uso.
-- **State remoto (S3)**: Mantido no bucket S3 configurado no [root.hcl](root.hcl). O `tg destroy` remove apenas os recursos provisionados, preservando o histórico de estado.
+1. **State Lock Nativo no S3 (`use_lockfile = true`)**:
+   - A partir do Terraform 1.10+, o bloqueio de concorrência é gerenciado diretamente nos metadados do bucket S3, eliminando a dependência legada de tabelas DynamoDB dedicadas.
+2. **Entrada Controlada**:
+   - Zero containers Fargate expostos na internet. O Security Group do serviço aceita conexões na porta 8080 exclusivamente a partir do Security Group do ALB.
+3. **Gestão de Senhas com Secrets Manager**:
+   - O RDS utiliza `manage_master_user_password = true`, fazendo com que a AWS crie, proteja e rotacione a senha de administrador do banco diretamente no Secrets Manager.
+4. **Aurora Serverless v2 no Free Tier**:
+   - Contas sob o plano Free Tier da AWS impõem a restrição `WithExpressConfiguration` para provisionar clusters Aurora. Para contas nessa modalidade, o módulo `rds/` (`db.t4g.micro`) é a escolha recomendada por ser 100% suportada sem restrições.
+5. **Ciclo de Vida para Teardown Rápido**:
+   - Parâmetros como `enable_deletion_protection = false`, `skip_final_snapshot = true` e `recovery_window_in_days = 0` garantem que o `terragrunt destroy` limpe a conta integralmente sem custos residuais após sessões de estudo.
