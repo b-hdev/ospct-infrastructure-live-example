@@ -13,6 +13,7 @@ prod/us-east-2/
 │   ├── alb-public/                   → Application Load Balancer público (porta 80 HTTP, entrada controlada)
 │   └── security-groups/rds-sg        → Security Group do RDS (libera porta 5432 para EC2)
 ├── computing/
+│   ├── ecr/app-repo                  → Repositório Docker privado com scan de vulnerabilidades e retenção de imagens
 │   ├── ec2/instance-01               → EC2 Bastion em subnet privada com AWS SSM (sem IP público nem SSH)
 │   ├── ec2/ecs/                      → ECS clássico com instâncias EC2 gerenciadas (cluster, ec2-node, service-app)
 │   └── ecs-fargate/
@@ -23,6 +24,8 @@ prod/us-east-2/
 ├── database/
 │   ├── rds/                          → PostgreSQL RDS tradicional (mono-instância)
 │   └── aurora-serverless-v2/         → Amazon Aurora PostgreSQL Serverless v2 (0.5 a 2.0 ACUs)
+├── observability/
+│   └── cloudwatch-alarms/            → Alarmes de métricas (High CPU no ECS Fargate)
 └── message/
     ├── sqs/queue-01/                 → Fila SQS padrão (módulo local)
     └── ses/                          → Amazon SES Email Identity para envio transacional (módulo local)
@@ -86,6 +89,10 @@ tg apply
 # 2.3. Identidade de E-mail no SES (envio transacional)
 cd prod/us-east-2/message/ses
 tg apply
+
+# 2.4. Repositório Privado de Containers (AWS ECR)
+cd prod/us-east-2/computing/ecr/app-repo
+tg apply
 ```
 
 ### 3. Banco de Dados e Host Bastion Seguro
@@ -131,6 +138,10 @@ tg apply
 # 5.2. Service Fargate privado integrado ao ALB e ao Secrets Manager
 cd prod/us-east-2/computing/ecs-fargate/service-app
 tg apply
+
+# 5.3. Observabilidade e Alarme de CPU do Fargate
+cd prod/us-east-2/observability/cloudwatch-alarms
+tg apply
 ```
 
 ---
@@ -140,6 +151,10 @@ tg apply
 Execute rigorosamente na **ordem inversa** — os recursos dependentes primeiro:
 
 ```bash
+# 0. Observabilidade (Alarme de métrica do Fargate)
+cd prod/us-east-2/observability/cloudwatch-alarms
+tg destroy
+
 # 1. Stack ECS Fargate (remove containers registrados no ALB)
 cd prod/us-east-2/computing/ecs-fargate/service-app
 tg destroy
@@ -185,6 +200,9 @@ cd prod/us-east-2/message/sqs/queue-01
 tg destroy
 
 cd prod/us-east-2/security/secrets-manager/app-secrets
+tg destroy
+
+cd prod/us-east-2/computing/ecr/app-repo
 tg destroy
 
 # 7. VPC e NAT Gateway (base de tudo, destrói por último)
