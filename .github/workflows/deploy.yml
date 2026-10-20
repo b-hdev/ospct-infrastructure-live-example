@@ -35,8 +35,8 @@ on:
     branches:
       - main
     paths:
-      # Só executa quando há mudanças na aplicação (não infra)
       - 'app/**'
+      - '.github/workflows/**'
   
   # Permite execução manual pelo GitHub UI
   workflow_dispatch:
