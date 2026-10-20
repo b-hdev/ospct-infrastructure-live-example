@@ -12,6 +12,7 @@ dependency "vpc" {
     vpc_id           = "vpc-mock12345"
     database_subnets = ["subnet-mockdb01", "subnet-mockdb02", "subnet-mockdb03"]
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "init"]
 }
 
 dependency "rds_sg" {
@@ -19,6 +20,7 @@ dependency "rds_sg" {
   mock_outputs = {
     id = "sg-mockrds01"
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "init"]
 }
 
 inputs = {
@@ -50,10 +52,21 @@ inputs = {
   # Utiliza o Security Group controlado (liberado apenas para EC2 Bastion SSM)
   create_security_group  = false
   vpc_security_group_ids = [dependency.rds_sg.outputs.id]
+
+  # =========================================================================
+  # Protecoes de Dados:
+  # Em PRODUCAO real:
+  #   deletion_protection     = true
+  #   skip_final_snapshot     = false
+  #   backup_retention_period = 7 (ou 14/30 dias)
+  # Em LABORATORIO (ajustado para teardown facil e Free Tier):
+  # =========================================================================
+  deletion_protection     = false
+  skip_final_snapshot     = true
+  backup_retention_period = 1
+
   storage_encrypted   = true
   apply_immediately   = true
-  skip_final_snapshot = true
-  deletion_protection = false
 
   tags = {
     Terraform   = "true"

@@ -10,7 +10,7 @@ Repositório de infraestrutura AWS corporativa orquestrado com **Terragrunt** e 
 prod/us-east-2/
 ├── networking/
 │   ├── vpc/vpc-ospct                 → VPC (10.0.0.0/16), 9 Subnets (Públicas, Privadas, Banco), NAT Gateway e IGW
-│   ├── alb-public/                   → Application Load Balancer público (Porta 80 HTTP, entrada controlada)
+│   ├── alb-public/                   → Application Load Balancer público (HTTPS 443 + Redirect 301 na 80)
 │   └── security-groups/rds-sg        → Security Group restritivo do RDS (5432 exclusivo para o Bastion SSM)
 ├── computing/
 │   ├── ecr/app-repo                  → Repositório Docker privado com scan de vulnerabilidades (CVE) e retenção
@@ -20,12 +20,14 @@ prod/us-east-2/
 │       ├── cluster/                  → ECS Cluster Serverless (ospct-fargate-cluster + Container Insights)
 │       └── service-app/              → Service Fargate 100% privado atrás do ALB (sem IP público)
 ├── security/
+│   ├── acm-certificate/              → Certificado SSL/TLS (X.509 RSA-2048) registrado no AWS ACM para o ALB
 │   └── secrets-manager/app-secrets   → Cofre de credenciais da aplicação (API keys, JWT, db credentials)
 ├── database/
 │   ├── rds/                          → PostgreSQL RDS padrão corporativo (db.t4g.micro, Free Tier elegível)
 │   └── aurora-serverless-v2/         → Amazon Aurora PostgreSQL Serverless v2 (Cluster com 0.5 a 2.0 ACUs)
 ├── observability/
-│   └── cloudwatch-alarms/            → Alarme CloudWatch de métricas (High CPU no ECS Fargate > 80%)
+│   ├── sns-alerts/                   → Tópico SNS para disparo de incidentes por e-mail aos responsáveis
+│   └── cloudwatch-alarms/            → Alarme CloudWatch de métricas (High CPU no ECS Fargate > 80% via SNS)
 └── message/
     ├── sqs/queue-01/                 → Fila SQS padrão com criptografia SSE gerenciada
     └── ses/                          → Amazon SES Email Identity para envio transacional seguro
@@ -38,12 +40,20 @@ prod/us-east-2/
 ```
                         ┌───────────────────────────────┐
                         │      INTERNET PÚBLICA         │
-                        └──────────────┬────────────────┘
-                                       │ (HTTP 80)
-                                       ▼
+                        └───────┬───────────────┬───────┘
+                                │               │
+                       (HTTP 80)│               │(HTTPS 443 Seguro)
+                                ▼               │
+                 ┌─────────────────────────────┐│
+                 │   Redirecionamento 301      ││
+                 │  (Força HTTPS Criptografado)││
+                 └──────────────┬──────────────┘│
+                                └───────┬───────┘
+                                        ▼
                         ┌───────────────────────────────┐
                         │  Application Load Balancer    │  ◄── Subnets Públicas
                         │         (alb-public)          │      (10.0.101-103.0/24)
+                        │   + Certificado SSL no ACM    │      Portas 80 e 443 abertas
                         └──────────────┬────────────────┘
                                        │ Encaminha tráfego
                                        │ (Porta 8080 interna)
@@ -59,6 +69,11 @@ prod/us-east-2/
                     │ Secrets Manager  │  │ AWS ECR App Repo │
                     │  (app-secrets)   │  │ (ospct-app-repo) │
                     └──────────────────┘  └──────────────────┘
+
+   ─────────────────────────────────────────────────────────────────────────────
+   Notificações e Observabilidade Automática:
+
+   ECS Fargate (CPU > 80%) ──► CloudWatch Alarm ──► Tópico SNS ──► E-mail DevOps
 
    ─────────────────────────────────────────────────────────────────────────────
    Acesso Administrativo ao Banco (Zero Portas Expostas para a Internet):
@@ -82,17 +97,37 @@ prod/us-east-2/
 
 ---
 
+## 🔐 Políticas de Segurança: Produção vs Laboratório
+
+Para manter a conformidade corporativa e garantir que configurações de estudo não vazem para produção real, adotamos os seguintes padrões:
+
+| Recurso / Parâmetro | Em PRODUÇÃO Real (Statpay) | Em LABORATÓRIO / Estudos | Motivo Técnico |
+| :--- | :--- | :--- | :--- |
+| **`deletion_protection` (DB)** | `true` | `false` | Impede destruição acidental em prod; permite `tg destroy` rápido no lab. |
+| **`skip_final_snapshot` (DB)** | `false` | `true` | Garante cópia de segurança antes de apagar; evita custos de snapshot no lab. |
+| **`backup_retention_period` (DB)**| `7` a `30` dias | `1` dia | PITR (Point-in-Time Recovery) em prod; limite do AWS Free Tier no lab. |
+| **`recovery_window_in_days` (Secrets)** | `7` a `30` dias | `0` dias | Quarentena de recuperação em prod; permite recriação com mesmo nome no lab. |
+| **Certificado SSL/TLS (ACM)** | Validado por DNS no Route 53 | Autoassinado importado no ACM | Criptografa tráfego TLS 1.3 sem exigir domínio registrado previamente. |
+| **Variáveis de Ambiente (`.env`)** | **Sem fallback padrão (Fail-Fast)** | **Sem fallback padrão (Fail-Fast)** | Aborta na hora se segredos como `APP_API_KEY` ou `AWS_ACCOUNT_ID` faltarem. |
+| **Mocks em dependências** | Restritos a `["validate", "init"]` | Restritos a `["validate", "init"]` | Impede que `plan` ou `apply` rodem com IDs fictícios em contas reais. |
+
+---
+
 ## 🚀 Sequência de Apply (Criar Infraestrutura)
 
 Para respeitar as dependências de rede e segurança, aplique na ordem abaixo:
 
-### 1. Camada de Rede Base
+### 1. Camada de Rede Base e Certificado SSL
 ```bash
 # 1.1. VPC com subnets públicas, privadas, database e NAT Gateway
 cd prod/us-east-2/networking/vpc/vpc-ospct
 terragrunt apply --auto-approve
 
-# 1.2. Application Load Balancer Público (Entrada controlada da aplicação)
+# 1.2. Certificado SSL/TLS no AWS ACM (Necessário antes do ALB)
+cd prod/us-east-2/security/acm-certificate
+terragrunt apply --auto-approve
+
+# 1.3. Application Load Balancer Público (Porta 80 redirect 301 + HTTPS 443)
 cd prod/us-east-2/networking/alb-public
 terragrunt apply --auto-approve
 ```
@@ -136,7 +171,7 @@ cd prod/us-east-2/database/aurora-serverless-v2
 terragrunt apply --auto-approve
 ```
 
-### 4. Camada de Computação e Observabilidade (ECS Fargate)
+### 4. Camada de Computação e Observabilidade (ECS Fargate + SNS)
 ```bash
 # 4.1. Cluster ECS Fargate com Container Insights
 cd prod/us-east-2/computing/ecs-fargate/cluster
@@ -146,7 +181,11 @@ terragrunt apply --auto-approve
 cd prod/us-east-2/computing/ecs-fargate/service-app
 terragrunt apply --auto-approve
 
-# 4.3. Alarme CloudWatch para High CPU (> 80%)
+# 4.3. Tópico SNS para envio de Alertas por e-mail
+cd prod/us-east-2/observability/sns-alerts
+terragrunt apply --auto-approve
+
+# 4.4. Alarme CloudWatch para High CPU (> 80%) com disparo para o SNS
 cd prod/us-east-2/observability/cloudwatch-alarms
 terragrunt apply --auto-approve
 ```
@@ -158,8 +197,11 @@ terragrunt apply --auto-approve
 Para desmontar o ambiente sem erros de dependência ou recursos órfãos, execute **rigorosamente na ordem inversa**:
 
 ```bash
-# 0. Alarme do CloudWatch
+# 0. Observabilidade e Alarmes
 cd prod/us-east-2/observability/cloudwatch-alarms
+terragrunt destroy --auto-approve
+
+cd prod/us-east-2/observability/sns-alerts
 terragrunt destroy --auto-approve
 
 # 1. Serviço e Cluster ECS Fargate
@@ -169,8 +211,11 @@ terragrunt destroy --auto-approve
 cd prod/us-east-2/computing/ecs-fargate/cluster
 terragrunt destroy --auto-approve
 
-# 2. Application Load Balancer
+# 2. Application Load Balancer e Certificado ACM
 cd prod/us-east-2/networking/alb-public
+terragrunt destroy --auto-approve
+
+cd prod/us-east-2/security/acm-certificate
 terragrunt destroy --auto-approve
 
 # 3. Banco de Dados e Security Group
@@ -211,16 +256,19 @@ terragrunt destroy --auto-approve
 
 ## 🔗 Testes e Validação Prática
 
-### 1. Teste de Acesso à Aplicação via ALB
-Obtenha o endereço público do Load Balancer e teste a resposta HTTP:
+### 1. Teste de Redirecionamento HTTP (80) -> HTTPS (443) no ALB
 ```bash
 # Obter o DNS público do ALB
 cd prod/us-east-2/networking/alb-public
 ALB_DNS=$(terragrunt output -raw dns_name)
 
-# Testar com curl (deve retornar HTTP/1.1 200 OK)
+# 1. Testar requisição HTTP na porta 80 (deve retornar 301 Moved Permanently com Location HTTPS)
 curl -s -I "http://${ALB_DNS}"
+
+# 2. Testar requisição HTTPS direta na porta 443 (deve retornar HTTP 200 OK do container privado)
+curl -k -s -I "https://${ALB_DNS}"
 ```
+*(A flag `-k` é usada apenas no curl para aceitar certificados autoassinados em ambiente de laboratório).*
 
 ### 2. Acesso Seguro ao PostgreSQL via Túnel SSM (Port Forwarding)
 Sem abrir a porta 22 na internet e sem IP público na instância ou no banco, abra um túnel local diretamente para a porta 5432 do PostgreSQL:
@@ -256,8 +304,8 @@ docker push 248557779673.dkr.ecr.us-east-2.amazonaws.com/ospct-app-repo:latest
 
 1. **State Lock Nativo no S3 (`use_lockfile = true`)**:
    - A partir do Terraform 1.10+, o bloqueio de concorrência é gerenciado diretamente nos metadados do bucket S3, eliminando a dependência legada de tabelas DynamoDB dedicadas.
-2. **Entrada Controlada**:
-   - Zero containers Fargate expostos na internet. O Security Group do serviço aceita conexões na porta 8080 exclusivamente a partir do Security Group do ALB.
+2. **Entrada Controlada com Criptografia TLS**:
+   - O tráfego público entra exclusivamente pelo ALB. A porta 80 força o redirecionamento permanente (HTTP_301) para a porta 443 (HTTPS), e o ALB entrega a requisição descriptografada na porta 8080 para os containers Fargate privados via Security Group restrito.
 3. **Gestão de Senhas com Secrets Manager**:
    - O RDS utiliza `manage_master_user_password = true`, fazendo com que a AWS crie, proteja e rotacione a senha de administrador do banco diretamente no Secrets Manager.
 4. **Aurora Serverless v2 no Free Tier**:

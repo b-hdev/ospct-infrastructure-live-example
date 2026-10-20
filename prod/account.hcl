@@ -2,5 +2,5 @@
 # root.hcl configuration.
 locals {
   account_name   = "prod"
-  aws_account_id = get_env("AWS_ACCOUNT_ID", "placeholder-account-id")
+  aws_account_id = get_env("AWS_ACCOUNT_ID")
 }

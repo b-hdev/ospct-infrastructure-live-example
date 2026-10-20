@@ -42,6 +42,14 @@ inputs = {
   vpc_security_group_ids = [dependency.rds_sg.outputs.id]
 
   # Protecao ajustada para compatibilidade com conta Free Tier
+    # =========================================================================
+  # Protecoes de Dados:
+  # Em PRODUCAO real:
+  #   deletion_protection     = true
+  #   skip_final_snapshot     = false
+  #   backup_retention_period = 7 (ou 14/30 dias)
+  # Em LABORATORIO (ajustado para teardown facil e Free Tier):
+  # =========================================================================
   deletion_protection = false
   skip_final_snapshot = true
   backup_retention_period = 1

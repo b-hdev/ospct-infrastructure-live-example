@@ -11,6 +11,7 @@ dependency "ecs_cluster" {
   mock_outputs = {
     name = "ospct-fargate-cluster"
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "init"]
 }
 
 dependency "ecs_service" {
@@ -18,6 +19,15 @@ dependency "ecs_service" {
   mock_outputs = {
     name = "nginx-fargate-app"
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "init"]
+}
+
+dependency "sns" {
+  config_path = "../sns-alerts"
+  mock_outputs = {
+    topic_arn = "arn:aws:sns:us-east-2:123456789012:mock-topic"
+  }
+  mock_outputs_allowed_terraform_commands = ["validate", "init"]
 }
 
 inputs = {
@@ -37,6 +47,10 @@ inputs = {
     ClusterName = dependency.ecs_cluster.outputs.name
     ServiceName = dependency.ecs_service.outputs.name
   }
+
+  #Cloudwatch
+  alarm_actions = [dependency.sns.outputs.topic_arn]
+  ok_actions    = [dependency.sns.outputs.topic_arn]
 
   tags = {
     Terraform = "true"

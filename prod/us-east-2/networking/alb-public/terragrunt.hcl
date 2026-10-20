@@ -10,6 +10,14 @@ dependency "vpc" {
   config_path = "../vpc/vpc-ospct"
 }
 
+dependency "acm" {
+  config_path = "../../security/acm-certificate"
+  mock_outputs = {
+    arn = "arn:aws:acm:us-east-2:123456789012:certificate/mock-cert-id"
+  }
+  mock_outputs_allowed_terraform_commands = ["validate", "init"]
+}
+
 inputs = {
   name = "ospct-alb-public"
   vpc_id = dependency.vpc.outputs.vpc_id
@@ -25,8 +33,15 @@ inputs = {
       from_port = 80
       to_port = 80
       ip_protocol = "tcp"
-      description = "Trafego HTTP publico da internet"
+      description = "Entrada HTTP para redirect 301"
       cidr_ipv4   = "0.0.0.0/0"  
+    }
+    all_https = {
+      from_port = 443
+      to_port = 443
+      ip_protocol = "tcp"
+      description = "Trafego HTTPS publico criptografado"
+      cidr_ipv4 = "0.0.0.0/0"
     }
   }
   security_group_egress_rules = {
@@ -37,9 +52,21 @@ inputs = {
   }
 
   listeners = {
-    http = {
-      port       = 80
-      protocol   = "HTTP"
+    # 1. Porta 80: Redireciona tudo que chegar em HTTP puro para HTTPS
+    http_redirect = {
+      port        = 80
+      protocol    = "HTTP"
+      redirect = {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
+    }
+    # 2. Porta 443: Entrada segura HTTPS conectada ao certificado ACM e ao Target Group Fargate
+    https = {
+      port            = 443
+      protocol        = "HTTPS"
+      certificate_arn = dependency.acm.outputs.arn
       forward = {
         target_group_key = "ecs-fargate"
       }

@@ -10,12 +10,12 @@ inputs = {
   name        = "ospct/prod/app-secrets"
   description = "Credenciais e tokens confidenciais da aplicacao"
 
-  # Janela de recuperacao zerada para permitir recriacao imediata durante testes
+  # Janela de recuperacao zerada para permitir recriacao imediata durante testes porém o certo seria 7d.
   recovery_window_in_days = 0
 
   secret_string = jsonencode({
-    api_key     = get_env("APP_API_KEY", "placeholder-api-key")
-    jwt_secret  = get_env("APP_JWT_SECRET", "placeholder-jwt-secret")
+    api_key     = get_env("APP_API_KEY")
+    jwt_secret  = get_env("APP_JWT_SECRET")
     db_name     = get_env("DB_NAME", "appdb")
     db_username = get_env("DB_USERNAME", "dbadmin")
     environment = "production"
