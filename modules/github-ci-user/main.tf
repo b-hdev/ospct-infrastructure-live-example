@@ -63,8 +63,7 @@ variable "tags" {
 # ── 1. IAM User ─────────────────────────────────────────────────────
 
 resource "aws_iam_user" "ci_user" {
-  name          = var.iam_user_name
-  force_destroy = true
+  name = var.iam_user_name
 
   tags = merge(
     var.tags,

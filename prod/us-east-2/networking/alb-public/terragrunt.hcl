@@ -8,6 +8,11 @@ terraform {
 
 dependency "vpc" {
   config_path = "../vpc/vpc-ospct"
+  mock_outputs = {
+    vpc_id         = "vpc-00000000000000000"
+    public_subnets = ["subnet-00000000000000001", "subnet-00000000000000002"]
+  }
+  mock_outputs_allowed_terraform_commands = ["validate", "init", "destroy"]
 }
 
 dependency "acm" {
@@ -15,7 +20,7 @@ dependency "acm" {
   mock_outputs = {
     arn = "arn:aws:acm:us-east-2:123456789012:certificate/mock-cert-id"
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "init"]
+  mock_outputs_allowed_terraform_commands = ["validate", "init", "destroy"]
 }
 
 inputs = {

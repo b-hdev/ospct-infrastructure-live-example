@@ -8,10 +8,18 @@ terraform {
 
 dependency "vpc" {
   config_path = "../../vpc/vpc-ospct"
+  mock_outputs = {
+    vpc_id = "vpc-00000000000000000"
+  }
+  mock_outputs_allowed_terraform_commands = ["validate", "init", "destroy"]
 }
 
 dependency "ec2" {
   config_path = "../../../computing/ec2/instance-01"
+  mock_outputs = {
+    security_group_id = "sg-00000000000000000"
+  }
+  mock_outputs_allowed_terraform_commands = ["validate", "init", "destroy"]
 }
 
 inputs = {

@@ -40,7 +40,7 @@
 #   - Mais rápido que npm install em CI/CD
 #   - Falha se package-lock.json estiver desatualizado
 # ---------------------------------------------------------------------------
-FROM node:22-alpine AS deps
+FROM node:24-alpine AS deps
 
 # Instala dumb-init para signal handling correto (PID 1 problem)
 # POR QUE dumb-init?
@@ -59,9 +59,9 @@ COPY package.json package-lock.json* ./
 # Instala apenas dependências de produção de forma determinística
 # Garante que node_modules exista mesmo sem dependências externas
 RUN mkdir -p /usr/src/app/node_modules && \
-    if [ -f package-lock.json ]; then \
-      npm ci --omit=dev --ignore-scripts; \
-    fi
+  if [ -f package-lock.json ]; then \
+  npm ci --omit=dev --ignore-scripts; \
+  fi
 
 
 # ---------------------------------------------------------------------------
@@ -71,17 +71,17 @@ RUN mkdir -p /usr/src/app/node_modules && \
 #            Contém apenas: runtime Node.js + dependências prod + código.
 #            Nenhum artefato de build, cache npm, ou ferramenta dev.
 # ---------------------------------------------------------------------------
-FROM node:22-alpine AS production
+FROM node:24-alpine AS production
 
 # ── OCI Standard Labels ──────────────────────────────────────────────
 # Metadata seguindo o padrão OCI (Open Container Initiative)
 # Permite rastreabilidade da imagem em registries e ferramentas de scan
 LABEL org.opencontainers.image.title="OSPCT Cloud App" \
-      org.opencontainers.image.description="OSPCT Cloud Application - Production Server" \
-      org.opencontainers.image.version="1.0.0" \
-      org.opencontainers.image.vendor="OSPCT" \
-      org.opencontainers.image.source="https://github.com/b-hdev/ospct-infrastructure-live-example" \
-      org.opencontainers.image.licenses="UNLICENSED"
+  org.opencontainers.image.description="OSPCT Cloud Application - Production Server" \
+  org.opencontainers.image.version="1.0.0" \
+  org.opencontainers.image.vendor="OSPCT" \
+  org.opencontainers.image.source="https://github.com/b-hdev/ospct-infrastructure-live-example" \
+  org.opencontainers.image.licenses="UNLICENSED"
 
 # ── Variáveis de Ambiente ────────────────────────────────────────────
 # NODE_ENV=production:
@@ -89,7 +89,7 @@ LABEL org.opencontainers.image.title="OSPCT Cloud App" \
 #   - Express/frameworks desabilitam debug e stack traces
 #   - npm ignora devDependencies automaticamente
 ENV NODE_ENV=production \
-    PORT=8080
+  PORT=8080
 
 # ── Segurança: Usuário Non-Root ─────────────────────────────────────
 # POR QUE non-root?
@@ -104,7 +104,7 @@ ENV NODE_ENV=production \
 #   - É mais explícito e auditável
 #   - Segue o princípio de menor privilégio
 RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup -s /sbin/nologin
+  adduser -u 1001 -S appuser -G appgroup -s /sbin/nologin
 
 # ── Copiar dumb-init do stage anterior ──────────────────────────────
 COPY --from=deps /usr/bin/dumb-init /usr/bin/dumb-init
