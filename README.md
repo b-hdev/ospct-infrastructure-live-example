@@ -21,7 +21,8 @@ prod/us-east-2/
 ├── security/
 │   └── secrets-manager/app-secrets   → Cofre de credenciais da aplicação (API keys, JWT)
 ├── database/
-│   └── rds/                          → PostgreSQL RDS com master password gerenciada no Secrets Manager
+│   ├── rds/                          → PostgreSQL RDS tradicional (mono-instância)
+│   └── aurora-serverless-v2/         → Amazon Aurora PostgreSQL Serverless v2 (0.5 a 2.0 ACUs)
 └── message/
     ├── sqs/queue-01/                 → Fila SQS padrão (módulo local)
     └── ses/                          → Amazon SES Email Identity para envio transacional (módulo local)
@@ -97,8 +98,12 @@ tg apply
 cd prod/us-east-2/networking/security-groups/rds-sg
 tg apply
 
-# Banco de dados PostgreSQL RDS
+# Opção A: Banco de dados PostgreSQL RDS tradicional
 cd prod/us-east-2/database/rds
+tg apply
+
+# Opção B: Banco de dados Amazon Aurora Serverless v2 (Cluster com auto-scaling)
+cd prod/us-east-2/database/aurora-serverless-v2
 tg apply
 ```
 
@@ -156,8 +161,13 @@ tg destroy
 cd prod/us-east-2/computing/ec2/ecs/cluster
 tg destroy
 
-# 4. RDS e Security Group
+# 4. Banco de Dados (RDS ou Aurora) e Security Group
+# Se usou RDS:
 cd prod/us-east-2/database/rds
+tg destroy
+
+# Se usou Aurora Serverless v2:
+cd prod/us-east-2/database/aurora-serverless-v2
 tg destroy
 
 cd prod/us-east-2/networking/security-groups/rds-sg
