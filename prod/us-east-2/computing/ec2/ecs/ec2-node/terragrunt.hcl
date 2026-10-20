@@ -8,10 +8,16 @@ terraform {
 
 dependency "vpc" {
   config_path = "../../../../networking/vpc/vpc-ospct"
+  mock_outputs = {
+    private_subnets = ["subnet-mockprivate01"]
+  }
 }
 
 dependency "cluster" {
   config_path = "../cluster/"
+  mock_outputs = {
+    name = "ospct-ecs-cluster"
+  }
 }
 
 inputs = {

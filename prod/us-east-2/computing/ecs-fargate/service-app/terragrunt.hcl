@@ -32,7 +32,7 @@ inputs = {
   # Dimensões da Task Fargate (256 units = 0.25 vCPU, 512 MB de RAM)
   cpu    = 256
   memory = 512
-  # REDE FARGATE: Coloca o container na subnet pública com IP público próprio
+  # REDE FARGATE: Container em subnet privada, sem IP publico, acessado exclusivamente via ALB
   subnet_ids       = dependency.vpc.outputs.private_subnets
   assign_public_ip = false
 

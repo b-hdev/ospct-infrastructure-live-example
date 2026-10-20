@@ -8,10 +8,16 @@ terraform {
 
 dependency "cluster" {
   config_path = "../cluster"
+  mock_outputs = {
+    arn = "arn:aws:ecs:us-east-2:123456789012:cluster/ospct-ecs-cluster"
+  }
 }
 
 dependency "ec2_node" {
   config_path = "../ec2-node"
+  mock_outputs = {
+    id = "i-mockinstance01"
+  }
 }
 
 inputs = {
