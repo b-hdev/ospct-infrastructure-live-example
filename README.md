@@ -221,9 +221,26 @@ terragrunt apply --auto-approve
 # 2.5. IAM User GitHub Actions → AWS (Credenciais com Least-Privilege)
 cd prod/us-east-2/security/github-ci-user
 terragrunt apply --auto-approve
-# ⚠️  Após apply, copie os outputs para os GitHub Secrets:
-#     terragrunt output -raw access_key_id     → AWS_ACCESS_KEY_ID
-#     terragrunt output -raw secret_access_key → AWS_SECRET_ACCESS_KEY
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔑 COMO OBTER E CADASTRAR OS SECRETS NO GITHUB ACTIONS:
+#
+# 1. Obtenha a Access Key ID gerada pelo Terragrunt:
+#    terragrunt output -raw access_key_id
+#
+# 2. Obtenha a Secret Access Key gerada pelo Terragrunt:
+#    terragrunt output -raw secret_access_key
+#
+# 3. No GitHub: Acesse seu repositório → Settings → Secrets and variables → Actions
+#    (URL direta: https://github.com/<org>/<repo>/settings/secrets/actions)
+#
+# 4. Clique em "New repository secret" e cadastre:
+#    - Nome: AWS_ACCESS_KEY_ID      | Valor: <resultado do passo 1>
+#    - Nome: AWS_SECRET_ACCESS_KEY  | Valor: <resultado do passo 2>
+#
+# 💡 Caso precise rotacionar as chaves no futuro:
+#    aws iam create-access-key --user-name ospct-github-actions-deployer
+# ─────────────────────────────────────────────────────────────────────────────
 ```
 
 ### 3. Camada de Dados e Bastion Seguro
@@ -391,13 +408,17 @@ docker push "${ECR_URL}:latest"
 ```
 
 ### 4. Testar Pipeline CI/CD (GitHub Actions)
+
+> [!IMPORTANT]
+> **Pré-requisito:** Certifique-se de ter cadastrado os secrets `AWS_ACCESS_KEY_ID` e `AWS_SECRET_ACCESS_KEY` no GitHub (**Settings → Secrets and variables → Actions**), conforme o **Passo 2.5**.
+
 ```bash
 # Qualquer push na branch main com alterações em app/ dispara o pipeline:
 git add app/
 git commit -m "feat: deploy via CI/CD"
 git push origin main
 
-# Acompanhe em: https://github.com/<org>/<repo>/actions
+# Acompanhe em: https://github.com/b-hdev/ospct-infrastructure-live/actions
 # O pipeline faz: Build → Push ECR (tag SHA) → Deploy ECS → Wait Stability
 ```
 
