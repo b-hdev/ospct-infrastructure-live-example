@@ -10,13 +10,14 @@ Repositório de infraestrutura AWS orquestrado com **Terragrunt** e **Terraform*
 prod/us-east-2/
 ├── networking/
 │   ├── vpc/vpc-ospct                 → VPC, Subnets (públicas e privadas), NAT Gateway
+│   ├── alb-public/                   → Application Load Balancer público (porta 80 HTTP, entrada controlada)
 │   └── security-groups/rds-sg        → Security Group do RDS (libera porta 5432 para EC2)
 ├── computing/
-│   ├── ec2/instance-01               → EC2 Standalone / Bastion (public subnet)
+│   ├── ec2/instance-01               → EC2 Bastion em subnet privada com AWS SSM (sem IP público nem SSH)
 │   ├── ec2/ecs/                      → ECS clássico com instâncias EC2 gerenciadas (cluster, ec2-node, service-app)
 │   └── ecs-fargate/
 │       ├── cluster/                  → ECS Cluster Serverless (ospct-fargate-cluster + Spot)
-│       └── service-app/              → Task Definition + Service Fargate (awsvpc na porta 8080)
+│       └── service-app/              → Service Fargate 100% privado atrás do ALB (sem IP público)
 ├── security/
 │   └── secrets-manager/app-secrets   → Cofre de credenciais da aplicação (API keys, JWT)
 ├── database/
@@ -39,18 +40,19 @@ prod/us-east-2/
              ▼                 ▼                          ▼
       ┌──────────────┐   ┌────────────┐            ┌──────────────┐
       │  EC2 Stand.  │   │  RDS SG    │            │  ECS Cluster │
-      │(instance-01) │   └─────┬──────┘            └──────┬───────┘
-      └──────┬───────┘         │                          │
-             └────────┬────────┘                          ▼
-                      ▼                            ┌──────────────┐
-               ┌─────────────┐                     │ ECS EC2-Node │
-               │   RDS DB    │                     └──────┬───────┘
-               └─────────────┘                            │
-                                                          ▼
-                                                   ┌──────────────┐
-                                                   │ ECS Service  │
-                                                   │ (Nginx 8080) │
-                                                   └──────────────┘
+      │(instance-01) │   └─────┬──────┘            │(EC2 / Fargate│
+      └──────┬───────┘         │                   └──────┬───────┘
+             └────────┬────────┘                          │
+                      ▼                                   ▼
+               ┌─────────────┐                     ┌──────────────┐
+               │   RDS DB    │                     │ ECS Service  │
+               └─────────────┘                     │(Task Def 8080│
+                                                   └──────┬───────┘
+                                                          │ (injeta segredos)
+ ┌──────────────────────┐                          ┌──────▼───────┐
+ │   Mensageria AWS     │                          │Secrets Manager
+ │  SQS  │     SES      │                          │(app-secrets) │
+ └───────┴──────────────┘                          └──────────────┘
 ```
 
 ---
@@ -61,25 +63,33 @@ Execute na ordem de dependência — os componentes base primeiro:
 
 ### 1. Rede Base
 ```bash
-# VPC, Subnets públicas/privadas e NAT Gateway
+# 1.1. VPC, Subnets públicas/privadas e NAT Gateway
 cd prod/us-east-2/networking/vpc/vpc-ospct
+tg apply
+
+# 1.2. Application Load Balancer Público (Entrada controlada da aplicação)
+cd prod/us-east-2/networking/alb-public
 tg apply
 ```
 
-### 2. Mensageria e Comunicação (Opcionais / Independentes)
+### 2. Segurança e Mensageria (Independentes de VPC)
 ```bash
-# Fila SQS
+# 2.1. Cofre de Segredos (Secrets Manager)
+cd prod/us-east-2/security/secrets-manager/app-secrets
+tg apply
+
+# 2.2. Fila SQS
 cd prod/us-east-2/message/sqs/queue-01
 tg apply
 
-# Identidade de E-mail no SES (envio transacional)
+# 2.3. Identidade de E-mail no SES (envio transacional)
 cd prod/us-east-2/message/ses
 tg apply
 ```
 
-### 3. Banco de Dados e Instância Bastion
+### 3. Banco de Dados e Host Bastion Seguro
 ```bash
-# EC2 Standalone de acesso/bastion
+# EC2 Bastion privado com AWS SSM (sem IP público nem porta 22)
 cd prod/us-east-2/computing/ec2/instance-01
 tg apply
 
@@ -107,13 +117,13 @@ cd prod/us-east-2/computing/ec2/ecs/service-app
 tg apply
 ```
 
-### 5. Stack ECS com Fargate (Serverless - Sem EC2)
+### 5. Stack ECS com Fargate (Serverless - Subnets Privadas)
 ```bash
 # 5.1. Cluster Fargate com Capacity Providers (Fargate + Spot)
 cd prod/us-east-2/computing/ecs-fargate/cluster
 tg apply
 
-# 5.2. Task Definition e Service Fargate direto na VPC (awsvpc na porta 8080)
+# 5.2. Service Fargate privado integrado ao ALB e ao Secrets Manager
 cd prod/us-east-2/computing/ecs-fargate/service-app
 tg apply
 ```
@@ -125,40 +135,76 @@ tg apply
 Execute rigorosamente na **ordem inversa** — os recursos dependentes primeiro:
 
 ```bash
-# 1. ECS Service (para os containers e desaloca as portas)
+# 1. Stack ECS Fargate (remove containers registrados no ALB)
+cd prod/us-east-2/computing/ecs-fargate/service-app
+tg destroy
+
+cd prod/us-east-2/computing/ecs-fargate/cluster
+tg destroy
+
+# 2. Application Load Balancer Público
+cd prod/us-east-2/networking/alb-public
+tg destroy
+
+# 3. Stack ECS com EC2
 cd prod/us-east-2/computing/ec2/ecs/service-app
 tg destroy
 
-# 2. ECS EC2-Node (remove a VM do cluster)
 cd prod/us-east-2/computing/ec2/ecs/ec2-node
 tg destroy
 
-# 3. ECS Cluster
 cd prod/us-east-2/computing/ec2/ecs/cluster
 tg destroy
 
-# 4. RDS (destrói o banco de dados)
+# 4. RDS e Security Group
 cd prod/us-east-2/database/rds
 tg destroy
 
-# 5. Security Group do RDS
 cd prod/us-east-2/networking/security-groups/rds-sg
 tg destroy
 
-# 6. EC2 Standalone
+# 5. EC2 Bastion SSM
 cd prod/us-east-2/computing/ec2/instance-01
 tg destroy
 
-# 7. SQS e SES
+# 6. Segurança e Mensageria (SES, SQS, Secrets Manager)
 cd prod/us-east-2/message/ses
 tg destroy
 
 cd prod/us-east-2/message/sqs/queue-01
 tg destroy
 
-# 8. VPC e NAT Gateway (base de tudo, destrói por último)
+cd prod/us-east-2/security/secrets-manager/app-secrets
+tg destroy
+
+# 7. VPC e NAT Gateway (base de tudo, destrói por último)
 cd prod/us-east-2/networking/vpc/vpc-ospct
 tg destroy
+```
+
+---
+
+## 🔗 Testes de Conectividade e Validação
+
+### 1. Validar a Aplicação Web via ALB (Entrada Controlada)
+Faça a requisição na porta 80 pública do Application Load Balancer, que repassará para o container privado:
+```bash
+# Obter o DNS do ALB
+cd prod/us-east-2/networking/alb-public
+tg output dns_name
+
+# Testar via curl (deve retornar HTTP 200 do Nginx)
+curl http://<DNS_NAME_DO_ALB>
+```
+
+### 2. Conectar à EC2 Bastion via AWS SSM (Sem SSH e sem IP público)
+```bash
+# Obter o Instance ID da máquina
+cd prod/us-east-2/computing/ec2/instance-01
+tg output id
+
+# Iniciar sessão segura criptografada
+aws ssm start-session --target <INSTANCE_ID>
 ```
 
 ---

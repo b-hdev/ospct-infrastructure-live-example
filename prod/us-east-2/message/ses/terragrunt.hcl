@@ -7,5 +7,5 @@ terraform {
 }
 
 inputs = {
-  email = "[EMAIL_ADDRESS]"
+  email = get_env("SES_EMAIL", "placeholder@exemplo.com")
 }

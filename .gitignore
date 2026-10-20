@@ -32,3 +32,9 @@ override.tf.json
 *.tfvars
 # Permite subir apenas os arquivos de exemplo estruturados
 !*.tfvars.example
+
+# Variáveis de ambiente locais
+.env
+.env.*
+*.env
+!.env.example

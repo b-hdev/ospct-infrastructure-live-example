@@ -18,6 +18,10 @@ dependency "secrets" {
   config_path = "../../../security/secrets-manager/app-secrets"
 }
 
+dependency "alb" {
+  config_path = "../../../networking/alb-public"
+}
+
 inputs = {
   name = "nginx-fargate-app"
   cluster_arn = dependency.cluster.outputs.arn
@@ -29,8 +33,16 @@ inputs = {
   cpu    = 256
   memory = 512
   # REDE FARGATE: Coloca o container na subnet pública com IP público próprio
-  subnet_ids       = dependency.vpc.outputs.public_subnets
-  assign_public_ip = true
+  subnet_ids       = dependency.vpc.outputs.private_subnets
+  assign_public_ip = false
+
+  load_balancer = {
+    service = {
+      target_group_arn = dependency.alb.outputs.target_groups["ecs-fargate"].arn
+      container_name   = "nginx"
+      container_port   = 8080
+    }
+  }
 
   # Secret ARNs para o container acessar
   task_exec_secret_arns = [
@@ -39,12 +51,12 @@ inputs = {
 
   create_security_group = true
   security_group_ingress_rules = {
-    http = {
-      description = "HTTP Container Nginx na porta 8080"
-      cidr_ipv4   = "0.0.0.0/0"
-      from_port   = 8080
-      to_port     = 8080
-      ip_protocol = "tcp"
+    alb_to_app = {
+      description                  = "Acesso HTTP 8080 exclusivo a partir do ALB"
+      from_port                    = 8080
+      to_port                      = 8080
+      ip_protocol                  = "tcp"
+      referenced_security_group_id = dependency.alb.outputs.security_group_id
     }
   }
   security_group_egress_rules = {

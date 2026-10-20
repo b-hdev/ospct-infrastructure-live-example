@@ -15,16 +15,16 @@ dependency "ec2" {
 }
 
 inputs = {
-  name        = "meu-rds-db-sg"
+  name        = "ospct-rds-sg"
   description = "Security group for PostgreSQL RDS accessed by EC2"
   vpc_id      = dependency.vpc.outputs.vpc_id
 
   ingress_rules = {
     postgresql_from_ec2 = {
-      description                = "PostgreSQL from EC2"
-      from_port                  = 5432
-      to_port                    = 5432
-      ip_protocol                = "tcp"
+      description                  = "PostgreSQL from EC2 SSM Tunnel"
+      from_port                    = 5432
+      to_port                      = 5432
+      ip_protocol                  = "tcp"
       referenced_security_group_id = dependency.ec2.outputs.security_group_id
     }
   }
@@ -38,6 +38,6 @@ inputs = {
 
   tags = {
     Terraform   = "true"
-    Environment = "dev"
+    Environment = "prod"
   }
 }

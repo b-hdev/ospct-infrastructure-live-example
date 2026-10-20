@@ -19,37 +19,23 @@ inputs = {
 
   instance_type = "t3.micro"
 
-  key_name = "user1"
-
   ami_ssm_parameter = "/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id"
 
   create_iam_instance_profile = true
   iam_role_name = "ecs-instance-role-ospct"
   iam_role_policies = {
     AmazonEC2ContainerServiceforEC2Role = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+    # Permite administracao remota segura via AWS SSM Session Manager sem precisar de SSH
+    AmazonSSMManagedInstanceCore        = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
   }
 
-  subnet_id = dependency.vpc.outputs.public_subnets[0]
-  associate_public_ip_address = true
+  # Rede Privada: no do ECS protegido dentro da VPC, sem IP publico direto 
+  subnet_id                   = dependency.vpc.outputs.private_subnets[0]
+  associate_public_ip_address = false
 
   create_security_group = true
-  security_group_ingress_rules = {
-    ssh = {
-      description = "SSH"
-      cidr_ipv4 = "0.0.0.0/0"
-      from_port = 22
-      to_port = 22
-      ip_protocol = "tcp"
-    }
-
-    http = {
-      description = "HTTP Container"
-      cidr_ipv4 = "0.0.0.0/0"
-      from_port = 8080
-      to_port = 8080
-      ip_protocol = "tcp"
-    }
-  }
+  # Zero portas abertas para a internet (acesso via SSM e trafego controlado)
+  security_group_ingress_rules = {}
 
   security_group_egress_rules = {
     all = {

@@ -1,10 +1,11 @@
 locals {
   # Obtém o ID da conta AWS dinamicamente em tempo de execução (evita expor no repositório)
-  account_id   = get_aws_account_id()
+  # account_id   = get_aws_account_id()
 
   # Se ainda precisares de ler o nome da conta a partir do account.hcl:
   account_vars = read_terragrunt_config(find_in_parent_folders("account.hcl"))
   account_name = local.account_vars.locals.account_name
+  account_id = local.account_vars.locals.aws_account_id
 
   # Automatically load region-level variables
   region_vars  = read_terragrunt_config(find_in_parent_folders("region.hcl"))
@@ -22,10 +23,11 @@ remote_state {
 
   config = merge(
     {
-      encrypt = true
-      bucket  = "learning-tfstate-bhdev-${local.account_id}-${local.aws_region}"
-      key     = "${path_relative_to_include()}/terraform.tfstate"
-      region  = "${local.aws_region}"
+      encrypt      = true
+      bucket       = "learning-tfstate-bhdev-${local.account_id}-${local.aws_region}"
+      key          = "${path_relative_to_include()}/terraform.tfstate"
+      region       = "${local.aws_region}"
+      use_lockfile = true
     }
   )
 }
@@ -40,6 +42,15 @@ provider "aws" {
 
   # Only these AWS Account IDs may be operated on by this template
   allowed_account_ids = ["${local.account_id}"]
+
+  default_tags {
+    tags = {
+      Project = "ospct"
+      Environment = "${local.account_name}"
+      ManagedBy = "terragrunt"
+      Terraform   = "true"
+    }
+  }
 }
 EOF
 }
