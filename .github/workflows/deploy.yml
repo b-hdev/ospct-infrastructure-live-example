@@ -94,43 +94,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── Step 2: Autenticação AWS via OIDC ───────────────────────
-      # OIDC Federation: O GitHub Actions troca um token JWT temporário
-      # por credenciais AWS de curta duração (15min-1h).
-      #
-      # VANTAGEM sobre Access Keys:
-      #   - Sem secrets estáticos que podem vazar
-      #   - Credenciais expiram automaticamente
-      #   - Auditável via CloudTrail
-      #
-      # PRÉ-REQUISITO: Configurar IAM OIDC Provider + IAM Role na AWS
-      # Doc: https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
-      #
-      # ┌─────────────────────────────────────────────────────────┐
-      # │ ALTERNATIVA: Se OIDC não estiver configurado, comente  │
-      # │ este step e descomente o Step 2b abaixo.               │
-      # └─────────────────────────────────────────────────────────┘
-      - name: Configure AWS Credentials (OIDC)
+      # ── Step 2: Autenticação AWS via IAM Access Keys ─────────────
+      # Utilizado quando a organização AWS restringe OIDC via Service Control Policy (SCP).
+      # As credenciais são gerenciadas via GitHub Secrets com permissões mínimas (ECR + ECS).
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-
-      # ── Step 2b (ALTERNATIVA): Autenticação via Access Keys ─────
-      # ⚠️  MENOS SEGURO: Use apenas se OIDC não estiver disponível.
-      #     Access Keys são secrets estáticos que precisam de rotação manual.
-      #
-      # Para usar esta alternativa:
-      #   1. Comente o Step 2 acima
-      #   2. Descomente o bloco abaixo
-      #   3. Adicione AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY nos GitHub Secrets
-      #
-      # - name: Configure AWS Credentials (Access Keys)
-      #   uses: aws-actions/configure-aws-credentials@v4
-      #   with:
-      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      #     aws-region: ${{ env.AWS_REGION }}
 
       # ── Step 3: Login no Amazon ECR ─────────────────────────────
       # Autentica o Docker daemon com o ECR registry para poder

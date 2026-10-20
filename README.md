@@ -21,7 +21,7 @@ prod/us-east-2/
 │       └── service-app/              → Service Fargate 100% privado atrás do ALB (imagem ECR, sem IP público)
 ├── security/
 │   ├── acm-certificate/              → Certificado SSL/TLS (X.509 RSA-2048) registrado no AWS ACM para o ALB
-│   ├── github-oidc/                  → OIDC Federation GitHub Actions → AWS (IAM Role + Policies, zero Access Keys)
+│   ├── github-ci-user/               → IAM User GitHub Actions → AWS (least-privilege: ECR push + ECS deploy)
 │   └── secrets-manager/app-secrets   → Cofre de credenciais da aplicação (API keys, JWT, db credentials)
 ├── database/
 │   ├── rds/                          → PostgreSQL RDS padrão corporativo (db.t4g.micro, Free Tier elegível)
@@ -35,7 +35,7 @@ prod/us-east-2/
 
 modules/
 ├── self-signed-cert/                 → Módulo Terraform: Certificado autoassinado (TLS + ACM import)
-└── github-oidc/                      → Módulo Terraform: OIDC Provider + IAM Role para GitHub Actions
+└── github-ci-user/                   → Módulo Terraform: IAM User + Access Key + Policies restritas para CI/CD
 
 app/
 ├── Dockerfile                        → Multi-stage build production-grade (Alpine, non-root, dumb-init)
@@ -142,9 +142,9 @@ app/
   └────────────────────┘     └───────────────────┘     └──────────────┘
 ```
 
-**Autenticação:** OIDC Federation (módulo `security/github-oidc/`) — sem Access Keys estáticas.
+**Autenticação:** IAM User com Least Privilege (`security/github-ci-user/`) — permissões estritas para ECR push e ECS deploy.
 **Rastreabilidade:** Cada imagem é taggeada com o SHA do commit (7 chars).
-**Segurança:** Trust policy restringe por repositório + branch main.
+**Segurança:** Policies limitadas aos ARNs específicos do repositório ECR e do cluster/serviço ECS.
 
 ---
 
@@ -161,7 +161,7 @@ Para manter a conformidade corporativa e garantir que configurações de estudo 
 | **Certificado SSL/TLS (ACM)** | Validado por DNS no Route 53 | Autoassinado importado no ACM | Criptografa tráfego TLS 1.3 sem exigir domínio registrado previamente. |
 | **Variáveis de Ambiente (`.env`)** | **Sem fallback padrão (Fail-Fast)** | **Sem fallback padrão (Fail-Fast)** | Aborta na hora se segredos como `APP_API_KEY` ou `AWS_ACCOUNT_ID` faltarem. |
 | **Mocks em dependências** | Restritos a `["validate", "init"]` | Restritos a `["validate", "init"]` | Impede que `plan` ou `apply` rodem com IDs fictícios em contas reais. |
-| **Autenticação CI/CD** | **OIDC Federation** (zero Access Keys) | **OIDC Federation** (zero Access Keys) | Credenciais temporárias via STS, auditáveis no CloudTrail, sem secrets estáticos. |
+| **Autenticação CI/CD** | **OIDC / IAM User Least-Privilege** | **IAM User Least-Privilege (compatível SCP)** | Restrito aos ARNs exatos de ECR e ECS, sem acesso a outros serviços. |
 | **Dockerfile** | **Multi-stage, non-root, dumb-init** | **Multi-stage, non-root, dumb-init** | Superfície de ataque mínima (Alpine ~5MB), signal handling correto, UID 1001 dedicado. |
 
 ---
@@ -173,15 +173,11 @@ Todas as informações sensíveis ou identificáveis são lidas de variáveis de
 ```bash
 # Exportar ANTES de rodar qualquer comando terragrunt
 export AWS_ACCOUNT_ID="<seu-account-id-aws-12-digitos>"
-export GITHUB_ORG="<seu-usuario-ou-org-github>"
-export GITHUB_REPO="<nome-do-repositorio>"
 ```
 
 | Variável | Onde é usada | Falha se ausente |
 | :--- | :--- | :--- |
 | `AWS_ACCOUNT_ID` | `prod/account.hcl` → remote state S3 bucket | ✅ Sim (fail-fast) |
-| `GITHUB_ORG` | `security/github-oidc/` → trust policy OIDC | ✅ Sim (fail-fast) |
-| `GITHUB_REPO` | `security/github-oidc/` → trust policy OIDC | ✅ Sim (fail-fast) |
 
 ---
 
@@ -222,10 +218,12 @@ terragrunt apply --auto-approve
 cd prod/us-east-2/message/ses
 terragrunt apply --auto-approve
 
-# 2.5. OIDC Federation GitHub Actions → AWS (IAM Role para CI/CD)
-cd prod/us-east-2/security/github-oidc
+# 2.5. IAM User GitHub Actions → AWS (Credenciais com Least-Privilege)
+cd prod/us-east-2/security/github-ci-user
 terragrunt apply --auto-approve
-# ⚠️  Após apply, copie o output 'role_arn' e adicione como GitHub Secret: AWS_ROLE_ARN
+# ⚠️  Após apply, copie os outputs para os GitHub Secrets:
+#     terragrunt output -raw access_key_id     → AWS_ACCESS_KEY_ID
+#     terragrunt output -raw secret_access_key → AWS_SECRET_ACCESS_KEY
 ```
 
 ### 3. Camada de Dados e Bastion Seguro
@@ -289,8 +287,8 @@ terragrunt destroy --auto-approve
 cd prod/us-east-2/observability/sns-alerts
 terragrunt destroy --auto-approve
 
-# 0.5. OIDC Federation (GitHub Actions)
-cd prod/us-east-2/security/github-oidc
+# 0.5. IAM User CI/CD (GitHub Actions)
+cd prod/us-east-2/security/github-ci-user
 terragrunt destroy --auto-approve
 
 # 1. Serviço e Cluster ECS Fargate
@@ -417,9 +415,9 @@ git push origin main
    - Contas sob o plano Free Tier da AWS impõem a restrição `WithExpressConfiguration` para provisionar clusters Aurora. Para contas nessa modalidade, o módulo `rds/` (`db.t4g.micro`) é a escolha recomendada por ser 100% suportada sem restrições.
 5. **Ciclo de Vida para Teardown Rápido**:
    - Parâmetros como `enable_deletion_protection = false`, `skip_final_snapshot = true` e `recovery_window_in_days = 0` garantem que o `terragrunt destroy` limpe a conta integralmente sem custos residuais após sessões de estudo.
-6. **CI/CD com OIDC Federation (Zero Access Keys)**:
-   - O GitHub Actions autentica na AWS via OpenID Connect, trocando um JWT temporário por credenciais STS de curta duração. Elimina completamente a necessidade de `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` como secrets estáticos no GitHub.
+6. **CI/CD com Least-Privilege (Compatível com SCP)**:
+   - Em organizações AWS com Service Control Policies (SCPs) que restringem OIDC Providers, um IAM User dedicado (`ospct-github-actions-deployer`) com policies restritas exclusivamente aos ARNs de ECR (`PushPull`) e ECS (`UpdateService`) garante total segurança sem violar governança.
 7. **Dockerfile Multi-Stage Production-Grade**:
    - Imagem Alpine mínima (~5MB), usuário non-root dedicado (UID 1001), `dumb-init` para signal handling correto (PID 1 problem), `npm ci --omit=dev` para builds determinísticos, HEALTHCHECK nativo, e COPY seletivo (nunca `COPY . .`).
 8. **Fail-Fast para Variáveis de Ambiente**:
-   - Todas as informações sensíveis (`AWS_ACCOUNT_ID`, `GITHUB_ORG`, `GITHUB_REPO`) são lidas via `get_env()` sem fallback. Se alguma estiver ausente, o Terragrunt aborta imediatamente com erro explícito antes de qualquer operação.
+   - Informações sensíveis (`AWS_ACCOUNT_ID`) são lidas via `get_env()` sem fallback. Se estiver ausente, o Terragrunt aborta imediatamente com erro explícito antes de qualquer operação.
