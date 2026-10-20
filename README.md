@@ -418,7 +418,7 @@ git add app/
 git commit -m "feat: deploy via CI/CD"
 git push origin main
 
-# Acompanhe em: https://github.com/b-hdev/ospct-infrastructure-live/actions
+# Acompanhe em: https://github.com/b-hdev/ospct-infrastructure-live-example/actions
 # O pipeline faz: Build → Push ECR (tag SHA) → Deploy ECS → Wait Stability
 ```
 

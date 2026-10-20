@@ -92,13 +92,13 @@ jobs:
     steps:
       # ── Step 1: Checkout do código ──────────────────────────────
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # ── Step 2: Autenticação AWS via IAM Access Keys ─────────────
       # Utilizado quando a organização AWS restringe OIDC via Service Control Policy (SCP).
       # As credenciais são gerenciadas via GitHub Secrets com permissões mínimas (ECR + ECS).
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

@@ -80,7 +80,7 @@ LABEL org.opencontainers.image.title="OSPCT Cloud App" \
       org.opencontainers.image.description="OSPCT Cloud Application - Production Server" \
       org.opencontainers.image.version="1.0.0" \
       org.opencontainers.image.vendor="OSPCT" \
-      org.opencontainers.image.source="https://github.com/ospct/infrastructure-live" \
+      org.opencontainers.image.source="https://github.com/b-hdev/ospct-infrastructure-live-example" \
       org.opencontainers.image.licenses="UNLICENSED"
 
 # ── Variáveis de Ambiente ────────────────────────────────────────────
