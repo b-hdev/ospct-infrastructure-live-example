@@ -57,9 +57,11 @@ WORKDIR /usr/src/app
 COPY package.json package-lock.json* ./
 
 # Instala apenas dependências de produção de forma determinística
-# --omit=dev: exclui devDependencies (testes, linters, etc.)
-# --ignore-scripts: previne execução de scripts pós-install (segurança)
-RUN npm ci --omit=dev --ignore-scripts 2>/dev/null || true
+# Garante que node_modules exista mesmo sem dependências externas
+RUN mkdir -p /usr/src/app/node_modules && \
+    if [ -f package-lock.json ]; then \
+      npm ci --omit=dev --ignore-scripts; \
+    fi
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +114,7 @@ WORKDIR /usr/src/app
 
 # ── Copiar dependências de produção do stage deps ───────────────────
 # --chown garante que os arquivos pertencem ao appuser (non-root)
-COPY --from=deps --chown=appuser:appgroup /usr/src/app/node_modules ./node_modules/ 2>/dev/null || true
+COPY --from=deps --chown=appuser:appgroup /usr/src/app/node_modules ./node_modules/
 
 # ── Copiar código da aplicação ──────────────────────────────────────
 # COPY seletivo: apenas os arquivos necessários para rodar
