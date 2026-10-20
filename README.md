@@ -22,7 +22,8 @@ prod/us-east-2/
 ├── database/
 │   └── rds/                          → PostgreSQL RDS com master password gerenciada no Secrets Manager
 └── message/
-    └── sqs/queue-01/                 → Fila SQS padrão (módulo local)
+    ├── sqs/queue-01/                 → Fila SQS padrão (módulo local)
+    └── ses/                          → Amazon SES Email Identity para envio transacional (módulo local)
 ```
 
 ---
@@ -65,10 +66,14 @@ cd prod/us-east-2/networking/vpc/vpc-ospct
 tg apply
 ```
 
-### 2. Mensageria (Opcional / Independente)
+### 2. Mensageria e Comunicação (Opcionais / Independentes)
 ```bash
 # Fila SQS
 cd prod/us-east-2/message/sqs/queue-01
+tg apply
+
+# Identidade de E-mail no SES (envio transacional)
+cd prod/us-east-2/message/ses
 tg apply
 ```
 
@@ -144,7 +149,10 @@ tg destroy
 cd prod/us-east-2/computing/ec2/instance-01
 tg destroy
 
-# 7. SQS
+# 7. SQS e SES
+cd prod/us-east-2/message/ses
+tg destroy
+
 cd prod/us-east-2/message/sqs/queue-01
 tg destroy
 
@@ -174,6 +182,22 @@ Para testar se a EC2 alcança o PostgreSQL nas subnets privadas:
 ```bash
 # De dentro da EC2 instance-01 (via SSH):
 nc -zv meu-rds-db.<id>.us-east-2.rds.amazonaws.com 5432
+```
+
+### 3. Validar e Testar Envio com Amazon SES
+Para verificar o status da identidade e disparar um e-mail de teste:
+```bash
+# 1. Consultar status de verificação (deve retornar "VerificationStatus": "Success")
+aws ses get-identity-verification-attributes \
+  --identities "seu-email@gmail.com" \
+  --region us-east-2
+
+# 2. Disparar e-mail de teste via CLI (dentro do sandbox: de você para você)
+aws ses send-email \
+  --from "seu-email@gmail.com" \
+  --destination "ToAddresses=seu-email@gmail.com" \
+  --message "Subject={Data='Teste SES',Charset=utf-8},Body={Text={Data='Mensagem de teste enviada pelo SES.',Charset=utf-8}}" \
+  --region us-east-2
 ```
 
 ---
