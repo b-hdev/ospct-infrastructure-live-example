@@ -154,6 +154,7 @@ resource "aws_iam_user_policy" "ecs_deploy" {
         Effect = "Allow"
         Action = "iam:PassRole"
         Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.ecs_service_name}-*",
           "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*ecs*",
           "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*ECS*"
         ]
