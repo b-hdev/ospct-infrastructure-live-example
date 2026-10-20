@@ -7,11 +7,11 @@ terraform {
 }
 
 inputs = {
-  name        = "ospct/prod/app-credentials"
+  name        = "ospct/prod/app-secrets"
   description = "Credenciais e tokens confidenciais da aplicacao"
 
-  # Janela de recuperacao: em producao, retem por 7 dias antes de deletar de vez
-  recovery_window_in_days = 7
+  # Janela de recuperacao zerada para permitir recriacao imediata durante testes
+  recovery_window_in_days = 0
 
   secret_string = jsonencode({
     api_key     = get_env("APP_API_KEY", "placeholder-api-key")
