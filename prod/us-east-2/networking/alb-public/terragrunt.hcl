@@ -16,6 +16,9 @@ inputs = {
 
   subnets = dependency.vpc.outputs.public_subnets
 
+  # Permite destroy sem bloqueio de protecao
+  enable_deletion_protection = false
+
   create_security_group = true
   security_group_ingress_rules = {
     all_http = {
