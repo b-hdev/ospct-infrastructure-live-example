@@ -245,9 +245,9 @@ resource "aws_iam_role_policy" "ecs_deploy" {
         Resource = [
           var.ecs_cluster_arn,
           # Service ARN segue o padrão: arn:aws:ecs:region:account:service/cluster/service
-          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:service/${element(split("/", var.ecs_cluster_arn), length(split("/", var.ecs_cluster_arn)) - 1)}/${var.ecs_service_name}",
+          "arn:aws:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:service/${element(split("/", var.ecs_cluster_arn), length(split("/", var.ecs_cluster_arn)) - 1)}/${var.ecs_service_name}",
           # Task ARN (wildcard pois tasks têm IDs dinâmicos)
-          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task/${element(split("/", var.ecs_cluster_arn), length(split("/", var.ecs_cluster_arn)) - 1)}/*"
+          "arn:aws:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:task/${element(split("/", var.ecs_cluster_arn), length(split("/", var.ecs_cluster_arn)) - 1)}/*"
         ]
       },
       {
